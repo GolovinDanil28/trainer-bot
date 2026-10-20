@@ -1,0 +1,27 @@
+# Аудит guardrails
+.hub/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Локальное окружение
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite3
+
+# OS / редакторы
+.DS_Store
+.idea/
+.vscode/
+*.swp

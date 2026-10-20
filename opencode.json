@@ -1,0 +1,74 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "permissions": [
+    {
+      "action": "shell",
+      "resource": "*",
+      "effect": "ask"
+    },
+    {
+      "action": "shell",
+      "resource": "git status *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git diff *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git log *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git add *",
+      "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "git commit *",
+      "effect": "ask"
+    },
+    {
+      "action": "shell",
+      "resource": "git push *",
+      "effect": "ask"
+    },
+    {
+      "action": "read",
+      "resource": "*.env",
+      "effect": "deny"
+    },
+    {
+      "action": "read",
+      "resource": "*.env.*",
+      "effect": "deny"
+    },
+    {
+      "action": "external_directory",
+      "resource": "*",
+      "effect": "ask"
+    }
+  ],
+
+  "policies": [
+    {
+      "action": "tool.use",
+      "resource": "shell:rm -rf *",
+      "effect": "deny"
+    },
+    {
+      "action": "tool.use",
+      "resource": "shell:git push *--force*",
+      "effect": "deny"
+    },
+    {
+      "action": "tool.use",
+      "resource": "shell:sudo *",
+      "effect": "deny"
+    }
+  ]
+}
