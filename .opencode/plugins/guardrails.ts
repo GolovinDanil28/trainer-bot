@@ -22,14 +22,14 @@
 import { existsSync, readdirSync, readFileSync, appendFileSync, mkdirSync } from "node:fs"
 import { join, resolve, relative, sep } from "node:path"
 
-const ROOT = "."
-
 // ─────────────────────────────────────────────────────────────── helpers ────
 
-function isProductCode(absPath: string): boolean {
+function isProductCode(root: string, absPath: string): boolean {
   // Продуктовый код живёт в projects/<name>/. Всё остальное (спеки, доки,
   // обучение, база знаний) правилу spec-first не подчиняется.
-  const rel = relative(ROOT, absPath)
+  // root обязан быть абсолютным: "." разрешился бы относительно cwd сервера,
+  // а не относительно директории проекта.
+  const rel = relative(root, absPath)
   if (rel.startsWith("..")) return false
   const parts = rel.split(sep)
   return parts[0] === "projects" && parts.length > 2
@@ -70,6 +70,16 @@ function audit(root: string, entry: Record<string, unknown>) {
   }
 }
 
+function debug(root: string, msg: string) {
+  try {
+    const dir = join(root, ".hub")
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    appendFileSync(join(dir, "debug.log"), msg + "\n", "utf8")
+  } catch {
+    /* ignore */
+  }
+}
+
 function absolute(root: string, p: string): string {
   if (!p) return root
   return p.startsWith("/") ? resolve(p) : resolve(root, p)
@@ -97,9 +107,14 @@ export default {
     // ── 1. spec-gate ───────────────────────────────────────────────────────
     await ctx.permission.hook("evaluate", async (event: any) => {
       try {
+        debug(
+          root,
+          "permission.evaluate action=" + event.action +
+          " resources=" + JSON.stringify(event.resources) + " effect=" + event.effect,
+        )
         if (event.action !== "edit") return
         const targets = (event.resources ?? []).map((r: string) => absolute(root, r))
-        const productFiles = targets.filter(isProductCode)
+        const productFiles = targets.filter((p: string) => isProductCode(root, p))
         if (productFiles.length === 0) return
         if (hasApprovedChange(root)) return
 
@@ -109,6 +124,7 @@ export default {
           "Открытых changes с незакрытыми пунктами tasks.md не найдено.\n" +
           "Варианты: (1) /spec <что делаем> — создать спеку; " +
           "(2) если это багфикс или бойлерплейт — скажи, и правило не применяется."
+        debug(root, "spec-gate СРАБОТАЛ на " + JSON.stringify(productFiles) + " → effect=ask")
       } catch {
         /* ignore */
       }
@@ -125,9 +141,18 @@ export default {
             event.message =
               "Заблокировано guardrails: команда выглядит разрушительной. " +
               "Если она действительно нужна — выполни её вручную в терминале."
+            debug(root, "shell-guard СРАБОТАЛ на " + cmd + " → effect=deny")
             return
           }
         }
+      } catch {
+        /* ignore */
+      }
+    })
+
+    await ctx.tool.hook("execute.before", async (event: any) => {
+      try {
+        debug(root, "tool.execute.before tool=" + event.tool + " input=" + JSON.stringify(event.input).slice(0, 300))
       } catch {
         /* ignore */
       }
