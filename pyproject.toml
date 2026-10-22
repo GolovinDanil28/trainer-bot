@@ -1,0 +1,19 @@
+[tool.pytest.ini_options]
+# Тесты лежат только в tests/, чтобы `pytest` в корне не собирал ничего лишнего.
+testpaths = ["tests"]
+# Корень проекта в sys.path: иначе `from src.core import ...` в тестах не найдётся.
+pythonpath = ["."]
+# pytest-asyncio 1.x: без auto каждая async-функция требует явного маркера.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+# Иначе ruff считает проект py39 и предлагает совместимые с древностью
+# переписывания вместо того, что реально работает на 3.14.
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B — bugbear: ловит забытые аргументы, mutable default, сравнения на None через ==.

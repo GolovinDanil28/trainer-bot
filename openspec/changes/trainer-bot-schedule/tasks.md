@@ -5,7 +5,7 @@
 
 ## 1. Каркас и конфигурация
 
-- [ ] 1.1 Создать структуру `src/core`, `src/db`, `src/bot`, `src/scheduler` и
+- [x] 1.1 Создать структуру `src/core`, `src/db`, `src/bot`, `src/scheduler` и
   зависимости (python-telegram-bot, SQLAlchemy 2.0, APScheduler, pydantic-settings,
   pytest). Проверка: `pytest` зелёный на пустом smoke-тесте, `python -c "import src.core"`
   не падает. (каркас для R-01…R-13)
