@@ -1,6 +1,9 @@
 # Аудит guardrails
 .hub/
 
+# Личные заметки (не часть продукта)
+ПРОЕКТЫ.md
+
 # Python
 __pycache__/
 *.py[cod]
