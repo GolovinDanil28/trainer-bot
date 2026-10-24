@@ -8,6 +8,9 @@ from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
+# Модели обязаны быть импортированы до create_all: метадата знает только те
+# таблицы, чьи классы уже загружены.
+from src.db import models  # noqa: F401
 from src.db.base import Base
 
 

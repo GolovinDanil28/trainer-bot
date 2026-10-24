@@ -1,0 +1,53 @@
+"""Сервис расписания: связывает разбор команды, базу и тексты ответов.
+
+Здесь живёт вся логика обработки команды, но нет ни одного объекта Telegram.
+Поэтому сценарии проверяются обычным тестом: на вход строке, на выходе текст
+и состояние базы.
+"""
+
+from sqlalchemy.orm import Session, sessionmaker
+
+from src.core.messages import (
+    format_created,
+    format_disabled,
+    format_schedule,
+    format_unknown_workout,
+)
+from src.core.schedule import CommandError, parse_new_command
+from src.db import repository
+
+
+class WorkoutService:
+    """Операции расписания в терминах команд пользователя."""
+
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
+
+    def create_from_command(self, text: str) -> str:
+        """`/new …` → текст подтверждения или текст ошибки."""
+        try:
+            draft = parse_new_command(text)
+        except CommandError as exc:
+            # Ошибка ввода не доходит до базы: транзакция даже не начинается.
+            return str(exc)
+
+        with self._session_factory() as session:
+            workout = repository.create_workout(session, draft)
+        return format_created(workout)
+
+    def show_schedule(self) -> str:
+        with self._session_factory() as session:
+            return format_schedule(repository.list_active(session))
+
+    def disable(self, raw_id: str) -> str:
+        """`/off <id>` → текст подтверждения или текст ошибки."""
+        try:
+            workout_id = int(raw_id)
+        except ValueError:
+            return f"Нужен номер тренировки, получено «{raw_id}». Посмотреть список: /list"
+
+        with self._session_factory() as session:
+            if not repository.deactivate(session, workout_id):
+                return format_unknown_workout(workout_id)
+
+        return format_disabled(workout_id)
