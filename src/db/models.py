@@ -6,9 +6,10 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.reminders import ReminderStatus
 from src.db.base import Base
 
 
@@ -47,3 +48,27 @@ class Schedule(Base):
     is_active: Mapped[bool] = mapped_column(default=True)
 
     workout: Mapped[Workout] = relationship(back_populates="schedules")
+
+
+class Reminder(Base):
+    """Событие доставки: одна тренировка в один конкретный момент.
+
+    Именно эта таблица делает отправку идемпотентной: уникальный ключ
+    `(workout_id, scheduled_at)` не даёт создать второе напоминание на тот же
+    момент, даже если процесс перезапустился или тик сработал дважды.
+    """
+
+    __tablename__ = "reminder"
+    __table_args__ = (UniqueConstraint("workout_id", "scheduled_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workout_id: Mapped[int] = mapped_column(ForeignKey("workout.id", ondelete="CASCADE"))
+    # SQLite не хранит таймзону, поэтому в базе всегда naive-UTC,
+    # а aware-UTC восстанавливается при чтении (см. repository._as_utc).
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(
+        String(10), default=ReminderStatus.PENDING.value, index=True
+    )
+    attempts: Mapped[int] = mapped_column(default=0)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))

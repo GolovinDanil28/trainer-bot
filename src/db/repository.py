@@ -5,13 +5,15 @@
 один commit.
 """
 
-from datetime import time
+from datetime import UTC, datetime, time
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from src.core.reminders import ReminderStatus
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutType, WorkoutView
-from src.db.models import Schedule, Workout
+from src.db.models import Reminder, Schedule, Workout
 
 
 def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
@@ -52,6 +54,35 @@ def deactivate(session: Session, workout_id: int) -> bool:
         row.is_active = False
     session.commit()
     return True
+
+
+def claim_reminder(session: Session, workout_id: int, scheduled_at: datetime) -> int | None:
+    """Занять момент напоминания. Возвращает id, если занял именно этот вызов.
+
+    `INSERT … ON CONFLICT DO NOTHING` вместо «проверить и вставить»: проверка
+    с последующей вставкой оставляет окно, в которое второй тик влезает и
+    отправляет то же напоминание второй раз.
+    """
+    statement = (
+        sqlite_insert(Reminder)
+        .values(
+            workout_id=workout_id,
+            scheduled_at=_naive_utc(scheduled_at),
+            status=ReminderStatus.PENDING.value,
+        )
+        .on_conflict_do_nothing(index_elements=["workout_id", "scheduled_at"])
+        .returning(Reminder.id)
+    )
+    reminder_id = session.scalar(statement)
+    session.commit()
+    return reminder_id
+
+
+def _naive_utc(moment: datetime) -> datetime:
+    """В базу — только naive-UTC: SQLite таймзону всё равно потеряет молча."""
+    if moment.tzinfo is None:
+        raise ValueError("время должно быть timezone-aware: непонятно, чей это час")
+    return moment.astimezone(UTC).replace(tzinfo=None)
 
 
 def to_view(workout: Workout) -> WorkoutView:
