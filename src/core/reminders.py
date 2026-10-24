@@ -19,6 +19,55 @@ class ReminderStatus(StrEnum):
     MISSED = "missed"
 
 
+class CheckinAction(StrEnum):
+    """Что можно нажать под напоминанием."""
+
+    DONE = "done"
+    SKIP = "skip"
+
+
+# Подписи на кнопках. В callback_data всегда английские значения — подпись
+# можно менять без миграции данных.
+CHECKIN_LABELS: dict[CheckinAction, str] = {
+    CheckinAction.DONE: "сделал",
+    CheckinAction.SKIP: "пропустил",
+}
+
+CALLBACK_PREFIX = "ci"
+
+
+class CallbackError(ValueError):
+    """Некорректные данные кнопки. Пользователю показывать не нужно."""
+
+
+def checkin_callback(reminder_id: int, action: CheckinAction) -> str:
+    """`ci:<reminder_id>:<done|skip>` — данные кнопки под напоминанием.
+
+    В кнопке лежит только id, а не тренировка и дата: id проверяется по базе,
+    а подделанные данные из кнопки ничего не смогут изменить.
+    """
+    return f"{CALLBACK_PREFIX}:{reminder_id}:{action.value}"
+
+
+def parse_checkin_callback(data: str) -> tuple[int, CheckinAction]:
+    """Разобрать данные кнопки. Бросает `CallbackError` на мусор."""
+    parts = data.split(":")
+    if len(parts) != 3 or parts[0] != CALLBACK_PREFIX:
+        raise CallbackError(f"ожидался формат {CALLBACK_PREFIX}:<id>:<action>, получено «{data}»")
+
+    try:
+        reminder_id = int(parts[1])
+    except ValueError as exc:
+        raise CallbackError(f"id напоминания должен быть числом, получено «{parts[1]}»") from exc
+
+    try:
+        action = CheckinAction(parts[2])
+    except ValueError as exc:
+        raise CallbackError(f"неизвестное действие «{parts[2]}»") from exc
+
+    return reminder_id, action
+
+
 @dataclass(frozen=True, slots=True)
 class ReminderMessage:
     """Всё, что нужно, чтобы показать напоминание пользователю."""

@@ -1,17 +1,20 @@
 """Тесты текстов ответов: сравниваем готовые строки."""
 
-from datetime import time
+from datetime import UTC, datetime, time
+from zoneinfo import ZoneInfo
 
 from src.core.messages import (
     EMPTY_LIST_HINT,
     format_created,
     format_disabled,
     format_draft_created,
+    format_reminder,
     format_schedule,
     format_time,
     format_unknown_workout,
     format_weekdays,
 )
+from src.core.reminders import ReminderMessage
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutType, WorkoutView
 
 STRENGTH = WorkoutView(
@@ -71,3 +74,56 @@ def test_empty_schedule_points_to_the_command():
 def test_disabled_and_unknown_messages():
     assert format_disabled(3) == "Тренировка #3 отключена. История отметок сохранена."
     assert format_unknown_workout(99) == "Тренировки #99 нет. Посмотреть список: /list"
+
+
+def test_reminder_text_uses_local_time():
+    # 14:30 UTC = 19:30 в Екатеринбурге (UTC+5).
+    message = ReminderMessage(
+        reminder_id=5,
+        workout_id=1,
+        workout_type=WorkoutType.STRENGTH,
+        duration_min=45,
+        scheduled_at_utc=datetime(2026, 10, 26, 14, 30, tzinfo=UTC),
+    )
+
+    text = format_reminder(message, ZoneInfo("Asia/Yekaterinburg"))
+
+    assert text == (
+        "Пора тренироваться: силовая, 45 мин, 19:30.\n"
+        "Отметь результат кнопкой ниже."
+    )
+
+
+def test_reminder_text_does_not_leak_ids():
+    # Пользователю не нужны ни id напоминания, ни id тренировки.
+    message = ReminderMessage(
+        reminder_id=5,
+        workout_id=77,
+        workout_type=WorkoutType.CARDIO,
+        duration_min=30,
+        scheduled_at_utc=datetime(2026, 10, 26, 4, 0, tzinfo=UTC),
+    )
+
+    text = format_reminder(message, ZoneInfo("Asia/Yekaterinburg"))
+
+    assert "77" not in text
+    assert "#5" not in text
+
+
+def test_reminder_text_for_long_workout_stays_readable():
+    # Длительность не ограничена сверху: 120 минут не должны ломать строку
+    # и не должны превращаться в «2 часа» — пользователь задавал минуты.
+    message = ReminderMessage(
+        reminder_id=9,
+        workout_id=3,
+        workout_type=WorkoutType.MOBILITY,
+        duration_min=120,
+        scheduled_at_utc=datetime(2026, 10, 26, 7, 0, tzinfo=UTC),
+    )
+
+    text = format_reminder(message, ZoneInfo("Europe/Moscow"))
+
+    assert text == (
+        "Пора тренироваться: мобильность, 120 мин, 10:00.\n"
+        "Отметь результат кнопкой ниже."
+    )

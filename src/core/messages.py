@@ -6,7 +6,9 @@
 
 from collections.abc import Sequence
 from datetime import time
+from zoneinfo import ZoneInfo
 
+from src.core.reminders import ReminderMessage
 from src.core.schedule import (
     WEEKDAY_SHORT,
     WORKOUT_TYPE_LABELS,
@@ -69,3 +71,13 @@ def format_disabled(workout_id: int) -> str:
 def format_unknown_workout(workout_id: int) -> str:
     """Ответ на `/off` с несуществующим id (R-03)."""
     return f"Тренировки #{workout_id} нет. Посмотреть список: /list"
+
+
+def format_reminder(message: ReminderMessage, zone: ZoneInfo) -> str:
+    """Текст напоминания (R-07): тип, длительность и время в таймзоне пользователя."""
+    local_time = message.scheduled_at_utc.astimezone(zone).strftime("%H:%M")
+    return (
+        f"Пора тренироваться: {WORKOUT_TYPE_LABELS[message.workout_type]}, "
+        f"{message.duration_min} мин, {local_time}.\n"
+        "Отметь результат кнопкой ниже."
+    )
