@@ -5,13 +5,13 @@
 один commit.
 """
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from src.core.reminders import ReminderStatus
+from src.core.reminders import ReminderMessage, ReminderStatus
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutType, WorkoutView
 from src.db.models import Reminder, Schedule, Workout
 
@@ -78,11 +78,124 @@ def claim_reminder(session: Session, workout_id: int, scheduled_at: datetime) ->
     return reminder_id
 
 
+def reminder_message(session: Session, reminder_id: int) -> ReminderMessage | None:
+    """Собрать всё нужное для отправки: напоминание + его тренировка.
+
+    Возвращает `None`, если строки нет: между захватом момента и отправкой
+    тренировку могли удалить, и падать из-за этого незачем.
+    """
+    row = session.execute(
+        select(Reminder, Workout)
+        .join(Workout, Reminder.workout_id == Workout.id)
+        .where(Reminder.id == reminder_id)
+    ).one_or_none()
+    if row is None:
+        return None
+
+    reminder, workout = row
+    workout_type = WorkoutType(workout.workout_type)
+    # В v1 у тренировки одна длительность, поэтому она берётся из workout,
+    # а не из расписания: `/new` не спрашивает разное время для разных дней.
+    return ReminderMessage(
+        reminder_id=reminder.id,
+        workout_id=workout.id,
+        workout_type=workout_type,
+        duration_min=workout.duration_min,
+        scheduled_at_utc=_as_utc(reminder.scheduled_at),
+    )
+
+
+def mark_reminder_sent(
+    session: Session, reminder_id: int, attempts: int, sent_at: datetime
+) -> None:
+    """Зафиксировать успешную отправку. `attempts` — сколько раз пробовали."""
+    _set_reminder_status(
+        session,
+        reminder_id,
+        status=ReminderStatus.SENT,
+        attempts=attempts,
+        sent_at=_naive_utc(sent_at),
+    )
+
+
+def mark_reminder_missed(session: Session, reminder_id: int, attempts: int) -> None:
+    """Отправить не удалось за отведённые попытки: момент потерян (R-09)."""
+    _set_reminder_status(
+        session, reminder_id, status=ReminderStatus.MISSED, attempts=attempts
+    )
+
+
+def _set_reminder_status(
+    session: Session,
+    reminder_id: int,
+    *,
+    status: ReminderStatus,
+    attempts: int,
+    sent_at: datetime | None = None,
+) -> None:
+    session.execute(
+        update(Reminder)
+        .where(Reminder.id == reminder_id)
+        .values(status=status.value, attempts=attempts, sent_at=sent_at)
+    )
+    session.commit()
+
+
+def cleanup_old_reminders(
+    session: Session, now: datetime, sent_window: timedelta = timedelta(seconds=30)
+) -> int:
+    """Перевести старые `sent` и «зависшие` `pending` в `missed`.
+
+    R-08: возвращает количество обновлённых строк.
+
+    Логика:
+    1. `sent` older than `sent_window` → `missed` (пользователь не откликнулся,
+       можно отправлять повторно).
+    2. `pending` older than `sent_window` → `missed` (никто не Claim'ом,
+       можно очистить).
+    3. `answered` не трогаем вообще.
+    """
+
+    cutoff = _naive_utc(now - sent_window)
+
+    # 1. `sent`, чей sent_at старше окна → missed
+    sent_stale = (
+        update(Reminder)
+        .where(
+            Reminder.status == ReminderStatus.SENT.value,
+            Reminder.sent_at is not None,
+            Reminder.sent_at < cutoff,
+        )
+        .values(status=ReminderStatus.MISSED.value, attempts=0)
+    )
+
+    # 2. `pending`, чей created_at старше окна → missed (никто неClaim'ом)
+    pending_stale = (
+        update(Reminder)
+        .where(
+            Reminder.status == ReminderStatus.PENDING.value,
+            Reminder.created_at is not None,
+            Reminder.created_at < cutoff,
+        )
+        .values(status=ReminderStatus.MISSED.value, attempts=0)
+    )
+
+    result1 = session.execute(sent_stale)
+    result2 = session.execute(pending_stale)
+    session.commit()
+    return result1.rowcount + result2.rowcount
+
+
 def _naive_utc(moment: datetime) -> datetime:
     """В базу — только naive-UTC: SQLite таймзону всё равно потеряет молча."""
     if moment.tzinfo is None:
         raise ValueError("время должно быть timezone-aware: непонятно, чей это час")
     return moment.astimezone(UTC).replace(tzinfo=None)
+
+
+def _as_utc(moment: datetime) -> datetime:
+    """Из базы — aware-UTC: наружу не должно утекать naive-время."""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 def to_view(workout: Workout) -> WorkoutView:

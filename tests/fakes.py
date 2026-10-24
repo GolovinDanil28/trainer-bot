@@ -5,6 +5,7 @@
 какому из них верить.
 """
 
+from collections import Counter
 from types import SimpleNamespace
 
 from src.core.reminders import ReminderMessage
@@ -15,15 +16,25 @@ class DeliveryFailed(RuntimeError):
 
 
 class FakeSender:
-    """Транспорт, который записывает отправленное и умеет падать."""
+    """Транспорт, который записывает отправленное и умеет падать.
 
-    def __init__(self, failures: int = 0) -> None:
+    `failures` — сколько первых попыток упадёт (проверка повторов).
+    `fail_for` — id напоминаний, которые не доставляются никогда (проверка
+    того, что одно упавшее напоминание не останавливает остальные).
+    """
+
+    def __init__(self, failures: int = 0, fail_for: set[int] | None = None) -> None:
         self._failures_left = failures
+        self._fail_for = fail_for or set()
         self.sent: list[ReminderMessage] = []
         self.attempts = 0
+        self.attempts_by_reminder: Counter[int] = Counter()
 
     async def send(self, message: ReminderMessage) -> None:
         self.attempts += 1
+        self.attempts_by_reminder[message.reminder_id] += 1
+        if message.reminder_id in self._fail_for:
+            raise DeliveryFailed(f"напоминание {message.reminder_id} не доставляется")
         if self._failures_left > 0:
             self._failures_left -= 1
             raise DeliveryFailed("Telegram недоступен")
