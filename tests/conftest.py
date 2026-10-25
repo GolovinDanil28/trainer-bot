@@ -1,5 +1,7 @@
 """Общие фикстуры: настоящая SQLite-база в tmp_path, без моков хранилища."""
 
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from src.bot.service import WorkoutService
@@ -21,4 +23,6 @@ def session_factory(engine):
 
 @pytest.fixture
 def service(session_factory) -> WorkoutService:
-    return WorkoutService(session_factory)
+    # Зона как у реального пользователя: тесты должны ловить ошибки перевода
+    # времени, а не проходить только в UTC.
+    return WorkoutService(session_factory, ZoneInfo("Asia/Yekaterinburg"))

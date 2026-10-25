@@ -13,7 +13,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 from src.bot.access import OWNER_KEY
 from src.bot.callbacks import on_checkin
-from src.bot.handlers import cmd_list, cmd_new, cmd_off
+from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off
 from src.bot.service import WorkoutService
 from src.bot.telegram_sender import TelegramSender
 from src.config import Settings
@@ -40,7 +40,7 @@ def build_runtime(settings: Settings) -> Runtime:
     return Runtime(
         engine=engine,
         session_factory=session_factory,
-        service=WorkoutService(session_factory),
+        service=WorkoutService(session_factory, settings.zone),
     )
 
 
@@ -64,6 +64,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("new", cmd_new))
     application.add_handler(CommandHandler("list", cmd_list))
     application.add_handler(CommandHandler("off", cmd_off))
+    application.add_handler(CommandHandler("history", cmd_history))
     application.add_handler(CallbackQueryHandler(on_checkin, pattern=r"^ci:"))
 
 

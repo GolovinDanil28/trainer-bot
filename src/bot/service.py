@@ -5,6 +5,8 @@
 и состояние базы.
 """
 
+from zoneinfo import ZoneInfo
+
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.messages import (
@@ -12,6 +14,7 @@ from src.core.messages import (
     format_checkin_saved,
     format_created,
     format_disabled,
+    format_history,
     format_schedule,
     format_unknown_reminder,
     format_unknown_workout,
@@ -24,8 +27,10 @@ from src.db import repository
 class WorkoutService:
     """Операции расписания в терминах команд пользователя."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: sessionmaker[Session], zone: ZoneInfo) -> None:
         self._session_factory = session_factory
+        # Таймзона нужна только для показа времени человеку: в базе всегда UTC.
+        self._zone = zone
 
     def create_from_command(self, text: str) -> str:
         """`/new …` → текст подтверждения или текст ошибки."""
@@ -66,3 +71,9 @@ class WorkoutService:
         if outcome.created:
             return format_checkin_saved(outcome.status)
         return format_already_marked(outcome.status)
+
+    def show_history(self) -> str:
+        """`/history` — последние записи журнала в таймзоне пользователя (R-13)."""
+        with self._session_factory() as session:
+            entries = repository.recent_history(session)
+        return format_history(entries, self._zone)

@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from datetime import time
 from zoneinfo import ZoneInfo
 
+from src.core.history import HistoryEntry
 from src.core.reminders import CHECKIN_STATUS_LABELS, CheckinStatus, ReminderMessage
 from src.core.schedule import (
     WEEKDAY_SHORT,
@@ -71,6 +72,34 @@ def format_disabled(workout_id: int) -> str:
 def format_unknown_workout(workout_id: int) -> str:
     """Ответ на `/off` с несуществующим id (R-03)."""
     return f"Тренировки #{workout_id} нет. Посмотреть список: /list"
+
+
+EMPTY_HISTORY_HINT = (
+    "История пока пуста. Первая запись появится после напоминания: "
+    "отметь его кнопками «сделал» или «пропустил»."
+)
+
+
+def format_history(entries: Sequence[HistoryEntry], zone: ZoneInfo) -> str:
+    """Последние записи журнала: дата, тип, результат (R-13).
+
+    Дата — в таймзоне пользователя: в базе момент хранится в UTC, но человеку
+    он нужен в своём времени, иначе «вчерашняя» тренировка выглядит сегодняшней.
+    """
+    if not entries:
+        return EMPTY_HISTORY_HINT
+
+    lines = ["Последние записи:"]
+    for entry in entries:
+        moment = entry.scheduled_at_utc.astimezone(zone)
+        result = (
+            "без ответа"
+            if entry.checkin is None
+            else CHECKIN_STATUS_LABELS[entry.checkin]
+        )
+        workout = WORKOUT_TYPE_LABELS[entry.workout_type]
+        lines.append(f"{moment:%d.%m.%Y %H:%M} — {workout}, {result}")
+    return "\n".join(lines)
 
 
 def format_reminder(message: ReminderMessage, zone: ZoneInfo) -> str:

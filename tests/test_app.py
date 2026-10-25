@@ -33,7 +33,7 @@ def test_application_registers_commands(tmp_path):
         for command in handler.commands
     }
 
-    assert commands == {"new", "list", "off"}
+    assert commands == {"new", "list", "off", "history"}
 
 
 async def test_start_hook_registers_running_job_and_stop_hook_cleans_up(tmp_path):

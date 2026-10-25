@@ -7,7 +7,7 @@ Telegram не поднимается: вместо `Update` и `Context` — п�
 
 from sqlalchemy import func, select
 
-from src.bot.handlers import cmd_list, cmd_new, cmd_off
+from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off
 from src.db.models import Workout
 from tests.fakes import make_context, make_update
 
@@ -60,3 +60,11 @@ async def test_cmd_list_uses_service(service):
     await cmd_list(update, service_context(service))
 
     assert "Твои тренировки:" in update.message.sent[0]
+
+
+async def test_cmd_history_replies_with_journal(service):
+    update = make_update("/history")
+
+    await cmd_history(update, service_context(service))
+
+    assert update.message.sent == [service.show_history()]

@@ -29,8 +29,10 @@ def session_factory(tmp_path):
 
 @pytest.fixture
 def service(session_factory):
+    from zoneinfo import ZoneInfo
+
     from src.bot.service import WorkoutService
-    return WorkoutService(session_factory)
+    return WorkoutService(session_factory, ZoneInfo("UTC"))
 
 
 async def test_three_attempts_then_missed_and_continue(

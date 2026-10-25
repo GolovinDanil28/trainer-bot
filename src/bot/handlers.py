@@ -33,3 +33,8 @@ async def cmd_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Нужен номер тренировки. Пример: /off 2")
         return
     await update.message.reply_text(_service(context).disable(arguments[0]))
+
+
+async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/history` — последние записи журнала (R-13)."""
+    await update.message.reply_text(_service(context).show_history())

@@ -13,6 +13,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from src.core.history import HistoryEntry
 from src.core.reminders import (
     CHECKIN_STATUS,
     CheckinAction,
@@ -196,6 +197,36 @@ def record_checkin(
 
 def _find_checkin(session: Session, reminder_id: int) -> Checkin | None:
     return session.scalar(select(Checkin).where(Checkin.reminder_id == reminder_id))
+
+
+def recent_history(session: Session, limit: int = 5) -> list[HistoryEntry]:
+    """Последние записи журнала: отвеченные и «без ответа» (R-13).
+
+    `pending` и `sent` не попадают: это ещё не результат, показывать нечего.
+    Сортировка по моменту тренировки, а не по времени записи: журнал читается
+    как «что было», а не «когда я нажал».
+    """
+    rows = session.execute(
+        select(Reminder, Workout, Checkin)
+        .join(Workout, Reminder.workout_id == Workout.id)
+        .outerjoin(Checkin, Checkin.reminder_id == Reminder.id)
+        .where(
+            Reminder.status.in_(
+                (ReminderStatus.ANSWERED.value, ReminderStatus.MISSED.value)
+            )
+        )
+        .order_by(Reminder.scheduled_at.desc(), Reminder.id.desc())
+        .limit(limit)
+    ).all()
+
+    return [
+        HistoryEntry(
+            scheduled_at_utc=_as_utc(reminder.scheduled_at),
+            workout_type=WorkoutType(workout.workout_type),
+            checkin=CheckinStatus(checkin.status) if checkin is not None else None,
+        )
+        for reminder, workout, checkin in rows
+    ]
 
 
 def _set_reminder_status(
