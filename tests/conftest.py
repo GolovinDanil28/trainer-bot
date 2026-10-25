@@ -1,5 +1,6 @@
 """Общие фикстуры: настоящая SQLite-база в tmp_path, без моков хранилища."""
 
+import os
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -26,3 +27,20 @@ def service(session_factory) -> WorkoutService:
     # Зона как у реального пользователя: тесты должны ловить ошибки перевода
     # времени, а не проходить только в UTC.
     return WorkoutService(session_factory, ZoneInfo("Asia/Yekaterinburg"))
+
+
+def _skip_ollama_items(items: list, enabled: bool) -> None:
+    """Пометить тесты с маркером `ollama` пропущенными, если модель не включена."""
+    if enabled:
+        return
+    skip = pytest.mark.skip(
+        reason="нужен RUN_OLLAMA_TESTS=1 и запущенная Ollama с qwen2.5:7b"
+    )
+    for item in items:
+        if "ollama" in item.keywords:
+            item.add_marker(skip)
+
+
+def pytest_collection_modifyitems(config, items: list) -> None:
+    # Обычный прогон не должен зависеть от того, запущена ли Ollama на машине.
+    _skip_ollama_items(items, enabled=os.getenv("RUN_OLLAMA_TESTS") == "1")

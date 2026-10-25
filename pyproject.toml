@@ -7,6 +7,10 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-q"
+# Реальная Ollama: по умолчанию такие тесты пропускаются (см. tests/conftest.py).
+markers = [
+    "ollama: требует запущенную Ollama и RUN_OLLAMA_TESTS=1",
+]
 
 [tool.ruff]
 line-length = 100

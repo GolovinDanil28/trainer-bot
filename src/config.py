@@ -5,6 +5,7 @@
 сразу, а не в момент первого напоминания в три часа ночи.
 """
 
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator
@@ -32,6 +33,12 @@ class Settings(BaseSettings):
     # Число нужно только для отладки, чтобы не ждать сутки.
     miss_window_hours: int | None = Field(default=None, ge=1)
 
+    # Локальная модель. Проверяем только синтаксис: бот обязан подниматься
+    # и работать со строгими командами, даже если Ollama не запущена (R-15).
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = Field(default="qwen2.5:7b", min_length=1)
+    ollama_timeout_seconds: float = Field(default=20, gt=0)
+
     @field_validator("tz")
     @classmethod
     def _known_timezone(cls, value: str) -> str:
@@ -41,6 +48,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"неизвестная таймзона '{value}'. Пример корректной: Asia/Yekaterinburg"
             ) from exc
+        return value
+
+    @field_validator("ollama_url")
+    @classmethod
+    def _ollama_url_is_http(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(
+                f"OLLAMA_URL должен быть http(s)-адресом с хостом, получено '{value}'. "
+                "Пример: http://localhost:11434"
+            )
         return value
 
     @property

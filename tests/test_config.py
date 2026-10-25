@@ -48,3 +48,32 @@ def test_miss_window_default_is_end_of_day():
 def test_negative_miss_window_rejected():
     with pytest.raises(ValidationError):
         make_settings(miss_window_hours=0)
+
+
+def test_ollama_defaults():
+    settings = make_settings()
+
+    assert settings.ollama_url == "http://localhost:11434"
+    assert settings.ollama_model == "qwen2.5:7b"
+    assert settings.ollama_timeout_seconds == 20
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["localhost:11434", "ftp://localhost:11434", "http://", ""],
+    ids=["без-схемы", "чужая-схема", "без-хоста", "пусто"],
+)
+def test_ollama_url_requires_http_scheme_and_host(url):
+    with pytest.raises(ValidationError, match="OLLAMA_URL"):
+        make_settings(ollama_url=url)
+
+
+@pytest.mark.parametrize("timeout", [0, -1], ids=["ноль", "отрицательный"])
+def test_ollama_timeout_must_be_positive(timeout):
+    with pytest.raises(ValidationError):
+        make_settings(ollama_timeout_seconds=timeout)
+
+
+def test_ollama_model_must_not_be_empty():
+    with pytest.raises(ValidationError):
+        make_settings(ollama_model="")
