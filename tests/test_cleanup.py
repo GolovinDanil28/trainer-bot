@@ -1,38 +1,24 @@
-"""Тест уборщика старых напоминаний: 4.4 R-08.
+"""Уборщик старых напоминаний: границы приходят готовыми моментами (4.4, R-08).
 
-Проверяет, что `sent` и `pending` старые более чем на 30 сек переводятся в `missed`,
-а `answered` оставляем в покое.
+Проверяем именно порог: что раньше границы — `missed`, что позже — не тронуто.
+Вычисление самой границы («до конца местных суток») живёт в `core/timeplan`.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import update as sq_update
+from sqlalchemy import update
 
 from src.core.reminders import ReminderStatus
+from src.core.schedule import Weekday, WorkoutDraft, WorkoutType
+from src.db import repository
 from src.db.models import Reminder
 
-
-@pytest.fixture
-def engine(tmp_path):
-    from src.db.session import create_db_engine, init_db
-    engine = create_db_engine(f"sqlite:///{tmp_path / 'trainer.db'}")
-    init_db(engine)
-    yield engine
-    engine.dispose()
+NOW = datetime(2026, 10, 26, 19, 0, tzinfo=UTC)
 
 
 @pytest.fixture
-def session_factory(engine):
-    from src.db.session import make_session_factory
-    return make_session_factory(engine)
-
-
-def test_cleanup_old_sent_reminders(session_factory):
-    """sent старше 30 секунд → missed."""
-    from src.core.schedule import Weekday, WorkoutDraft, WorkoutType
-    from src.db import repository as repo_mod
-
+def workout_id(session_factory) -> int:
     draft = WorkoutDraft(
         workout_type=WorkoutType.STRENGTH,
         weekdays=(Weekday.MONDAY,),
@@ -40,110 +26,106 @@ def test_cleanup_old_sent_reminders(session_factory):
         duration_min=45,
     )
     with session_factory() as session:
-        wid = repo_mod.create_workout(session, draft).id
-        moment = datetime(2026, 10, 26, 19, 30, tzinfo=UTC)
-        rid = repo_mod.claim_reminder(session, wid, moment)
+        return repository.create_workout(session, draft).id
 
-    # Вручнуюставим sent_at давным (30+ сек назад) через execute(update(...).values())
-    old_time = datetime(2026, 10, 26, 19, 29, 30, tzinfo=UTC)  # 30 сек назад
+
+def claim(session_factory, workout_id: int, moment: datetime = NOW) -> int:
     with session_factory() as session:
-        session.execute(
-            sq_update(Reminder)
-            .where(Reminder.id == rid)
-            .values(status=ReminderStatus.SENT.value, sent_at=old_time)
-        )
+        return repository.claim_reminder(session, workout_id, moment)
+
+
+def set_reminder(
+    session_factory,
+    reminder_id: int,
+    *,
+    status: ReminderStatus,
+    sent_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> None:
+    values: dict = {"status": status.value}
+    if sent_at is not None:
+        values["sent_at"] = sent_at
+    if created_at is not None:
+        values["created_at"] = created_at
+    with session_factory() as session:
+        session.execute(update(Reminder).where(Reminder.id == reminder_id).values(values))
         session.commit()
 
-    now = datetime(2026, 10, 26, 19, 31, tzinfo=UTC)  # сейчас
 
+def cleanup(session_factory) -> int:
     with session_factory() as session:
-        count = repo_mod.cleanup_old_reminders(session, now)
+        return repository.cleanup_old_reminders(
+            session,
+            sent_before=NOW - timedelta(hours=1),
+            pending_before=NOW - timedelta(minutes=5),
+        )
 
-    # Должно быть обновлено 1 строки
-    assert count == 1
 
+def status_of(session_factory, reminder_id: int) -> str:
     with session_factory() as session:
-        r = session.get(Reminder, rid)
-        assert r.status == ReminderStatus.MISSED.value
-        assert r.attempts == 0
+        return session.get(Reminder, reminder_id).status
 
 
-def test_cleanup_old_pending_reminders(session_factory):
-    """pending старше 30 секунд → missed."""
-    from src.core.schedule import Weekday, WorkoutDraft, WorkoutType
-    from src.db import repository as repo_mod
-
-    draft = WorkoutDraft(
-        workout_type=WorkoutType.CARDIO,
-        weekdays=(Weekday.WEDNESDAY,),
-        time_of_day=datetime(2026, 10, 26, 19, 30).time(),
-        duration_min=30,
+def test_sent_before_cutoff_becomes_missed(session_factory, workout_id):
+    reminder_id = claim(session_factory, workout_id)
+    set_reminder(
+        session_factory, reminder_id, status=ReminderStatus.SENT, sent_at=NOW - timedelta(hours=2)
     )
-    with session_factory() as session:
-        wid = repo_mod.create_workout(session, draft).id
 
-    # Создадим pending напоминание вручную (без claim, чтобы проверить old pending)
-    from src.db.models import Reminder
-    with session_factory() as session:
-        session.add(
-            Reminder(
-                workout_id=wid,
-                scheduled_at=datetime(2026, 10, 26, 19, 30).replace(tzinfo=None),  # naive UTC
-                status=ReminderStatus.PENDING.value,
-                created_at=datetime(2026, 10, 26, 19, 29, 30, tzinfo=UTC),
-            )
-        )
-        session.commit()
-
-    now = datetime(2026, 10, 26, 19, 31, tzinfo=UTC)
-
-    with session_factory() as session:
-        count = repo_mod.cleanup_old_reminders(session, now)
-
-    assert count == 1
-
-    with session_factory() as session:
-        r = session.get(Reminder, session.query(Reminder).filter_by(workout_id=wid).first().id)
-        assert r.status == ReminderStatus.MISSED.value
+    assert cleanup(session_factory) == 1
+    assert status_of(session_factory, reminder_id) == ReminderStatus.MISSED.value
 
 
-def test_cleanup_does_not_touch_answered(session_factory):
-    """answered не трогаем вообще — остаются answered."""
-    from src.core.schedule import Weekday, WorkoutDraft, WorkoutType
-    from src.db import repository as repo_mod
-
-    draft = WorkoutDraft(
-        workout_type=WorkoutType.MOBILITY,
-        weekdays=(Weekday.SUNDAY,),
-        time_of_day=datetime(2026, 10, 26, 10, 0).time(),
-        duration_min=20,
+def test_sent_inside_window_is_kept(session_factory, workout_id):
+    # Пользователь ещё может ответить: окно не истекло.
+    reminder_id = claim(session_factory, workout_id)
+    set_reminder(
+        session_factory,
+        reminder_id,
+        status=ReminderStatus.SENT,
+        sent_at=NOW - timedelta(minutes=10),
     )
-    with session_factory() as session:
-        wid = repo_mod.create_workout(session, draft).id
 
-    # Создадим answered напоминание со старым sent_at
-    from src.db.models import Reminder
-    old_time = datetime(2026, 10, 26, 10, 59, 30, tzinfo=UTC)  # 30+ сек назад
-    with session_factory() as session:
-        # Сначала claim и отправь как answered
-        moment = datetime(2026, 10, 26, 10, 0, tzinfo=UTC)
-        rid = repo_mod.claim_reminder(session, wid, moment)
-        # Используем ту же самую паттерн execute(update(...).values())
-        session.execute(
-            sq_update(Reminder).where(Reminder.id == rid).values(
-                status=ReminderStatus.ANSWERED.value, sent_at=old_time
-            )
-        )
-        session.commit()
+    assert cleanup(session_factory) == 0
+    assert status_of(session_factory, reminder_id) == ReminderStatus.SENT.value
 
-    now = datetime(2026, 10, 26, 10, 31, tzinfo=UTC)  # 30+ сек спустя
 
-    with session_factory() as session:
-        count = repo_mod.cleanup_old_reminders(session, now)
+def test_stuck_pending_becomes_missed(session_factory, workout_id):
+    # Падение между вставкой и отправкой: момент занят, но не отправлен.
+    reminder_id = claim(session_factory, workout_id)
+    set_reminder(
+        session_factory,
+        reminder_id,
+        status=ReminderStatus.PENDING,
+        created_at=NOW - timedelta(minutes=10),
+    )
 
-    # answered не должно за impacted
-    assert count == 0
+    assert cleanup(session_factory) == 1
+    assert status_of(session_factory, reminder_id) == ReminderStatus.MISSED.value
 
-    with session_factory() as session:
-        r = session.get(Reminder, rid)
-        assert r.status == ReminderStatus.ANSWERED.value
+
+def test_fresh_pending_is_kept(session_factory, workout_id):
+    reminder_id = claim(session_factory, workout_id)
+    set_reminder(
+        session_factory,
+        reminder_id,
+        status=ReminderStatus.PENDING,
+        created_at=NOW - timedelta(minutes=1),
+    )
+
+    assert cleanup(session_factory) == 0
+    assert status_of(session_factory, reminder_id) == ReminderStatus.PENDING.value
+
+
+def test_answered_is_never_touched(session_factory, workout_id):
+    reminder_id = claim(session_factory, workout_id)
+    set_reminder(
+        session_factory,
+        reminder_id,
+        status=ReminderStatus.ANSWERED,
+        sent_at=NOW - timedelta(days=1),
+        created_at=NOW - timedelta(days=1),
+    )
+
+    assert cleanup(session_factory) == 0
+    assert status_of(session_factory, reminder_id) == ReminderStatus.ANSWERED.value

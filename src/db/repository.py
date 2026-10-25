@@ -5,9 +5,9 @@
 один commit.
 """
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, time
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -42,7 +42,12 @@ def list_active(session: Session) -> list[WorkoutView]:
 
 
 def deactivate(session: Session, workout_id: int) -> bool:
-    """Выключить тренировку. Возвращает False, если такой активной нет."""
+    """Выключить тренировку. Возвращает False, если такой активной нет.
+
+    Вместе с тренировкой отменяются её ещё не отправленные напоминания (R-03,
+    задача 4.6): иначе `pending`, занятый до `/off`, всё равно уйдёт.
+    Отправленные и отвеченные не трогаем — это история.
+    """
     workout = session.scalars(
         select(Workout).where(Workout.id == workout_id, Workout.is_active.is_(True))
     ).one_or_none()
@@ -52,8 +57,25 @@ def deactivate(session: Session, workout_id: int) -> bool:
     workout.is_active = False
     for row in workout.schedules:
         row.is_active = False
+    _cancel_pending_reminders(session, workout_id)
     session.commit()
     return True
+
+
+def _cancel_pending_reminders(session: Session, workout_id: int) -> int:
+    """Удалить неотправленные напоминания тренировки, вернуть их количество.
+
+    Удаляем, а не помечаем: `pending` — это «ещё не случилось», истории в нём
+    нет, а освободившийся уникальный ключ не помешает, если тренировку
+    когда-нибудь включат обратно тем же моментом.
+    """
+    result = session.execute(
+        delete(Reminder).where(
+            Reminder.workout_id == workout_id,
+            Reminder.status == ReminderStatus.PENDING.value,
+        )
+    )
+    return result.rowcount
 
 
 def claim_reminder(session: Session, workout_id: int, scheduled_at: datetime) -> int | None:
@@ -141,49 +163,56 @@ def _set_reminder_status(
     session.commit()
 
 
-def cleanup_old_reminders(
-    session: Session, now: datetime, sent_window: timedelta = timedelta(seconds=30)
-) -> int:
-    """Перевести старые `sent` и «зависшие` `pending` в `missed`.
+def active_schedule_rows(session: Session) -> list[tuple[int, int, str]]:
+    """Строки расписания, которые ещё действуют: `(workout_id, weekday, "HH:MM")`.
 
-    R-08: возвращает количество обновлённых строк.
-
-    Логика:
-    1. `sent` older than `sent_window` → `missed` (пользователь не откликнулся,
-       можно отправлять повторно).
-    2. `pending` older than `sent_window` → `missed` (никто не Claim'ом,
-       можно очистить).
-    3. `answered` не трогаем вообще.
+    Фильтр по `is_active` на двух таблицах сразу: отключённая тренировка не
+    должна напоминать, даже если её строки расписания случайно остались
+    активными.
     """
+    rows = session.execute(
+        select(Schedule.workout_id, Schedule.weekday, Schedule.time_of_day)
+        .join(Workout, Schedule.workout_id == Workout.id)
+        .where(Schedule.is_active.is_(True), Workout.is_active.is_(True))
+        .order_by(Schedule.workout_id, Schedule.weekday, Schedule.time_of_day)
+    ).all()
+    return [(row.workout_id, row.weekday, row.time_of_day) for row in rows]
 
-    cutoff = _naive_utc(now - sent_window)
 
-    # 1. `sent`, чей sent_at старше окна → missed
-    sent_stale = (
+def cleanup_old_reminders(
+    session: Session,
+    *,
+    sent_before: datetime,
+    pending_before: datetime,
+) -> int:
+    """Пометить `missed` то, что уже не будет отвечено (R-08).
+
+    Границы приходят снаружи, потому что они зависят от таймзоны и настроек:
+    `sent_before` — начало окна ожидания (по умолчанию начало местных суток),
+    `pending_before` — порог «зависшего» `pending` (падение между вставкой
+    и отправкой). Репозиторий не знает про таймзоны — ему дают готовый момент.
+
+    `answered` не трогается никогда: отметка пользователя важнее времени.
+    """
+    sent_stale = session.execute(
         update(Reminder)
         .where(
             Reminder.status == ReminderStatus.SENT.value,
-            Reminder.sent_at is not None,
-            Reminder.sent_at < cutoff,
+            Reminder.sent_at.is_not(None),
+            Reminder.sent_at < _naive_utc(sent_before),
         )
-        .values(status=ReminderStatus.MISSED.value, attempts=0)
+        .values(status=ReminderStatus.MISSED.value)
     )
-
-    # 2. `pending`, чей created_at старше окна → missed (никто неClaim'ом)
-    pending_stale = (
+    pending_stale = session.execute(
         update(Reminder)
         .where(
             Reminder.status == ReminderStatus.PENDING.value,
-            Reminder.created_at is not None,
-            Reminder.created_at < cutoff,
+            Reminder.created_at < _naive_utc(pending_before),
         )
-        .values(status=ReminderStatus.MISSED.value, attempts=0)
+        .values(status=ReminderStatus.MISSED.value)
     )
-
-    result1 = session.execute(sent_stale)
-    result2 = session.execute(pending_stale)
     session.commit()
-    return result1.rowcount + result2.rowcount
+    return sent_stale.rowcount + pending_stale.rowcount
 
 
 def _naive_utc(moment: datetime) -> datetime:

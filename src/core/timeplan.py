@@ -67,3 +67,24 @@ def moment_in_window(
     if candidate < now_utc + window:
         return candidate
     return None
+
+
+def waiting_cutoff(
+    now_utc: datetime,
+    zone: ZoneInfo,
+    miss_window: timedelta | None,
+) -> datetime:
+    """Момент, раньше которого отправленное напоминание считается `missed`.
+
+    По умолчанию окно — «до конца суток пользователя» (R-08): ответить можно
+    до местной полуночи, всё, что отправлено раньше начала сегодняшнего дня,
+    уже не ответить. `miss_window` (часы) существует только для отладки.
+    """
+    if miss_window is not None:
+        return now_utc - miss_window
+
+    local_midnight = datetime.combine(
+        now_utc.astimezone(zone).date(), time.min, tzinfo=zone
+    )
+    return local_midnight.astimezone(UTC)
+

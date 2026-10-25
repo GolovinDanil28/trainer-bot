@@ -4,13 +4,13 @@
 новогоднюю ночь и потом полдня ищется причина.
 """
 
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from src.core.schedule import Weekday
-from src.core.timeplan import moment_in_window, next_occurrence
+from src.core.timeplan import moment_in_window, next_occurrence, waiting_cutoff
 
 YEKBURG = ZoneInfo("Asia/Yekaterinburg")  # UTC+5, перехода на летнее время нет
 BERLIN = ZoneInfo("Europe/Berlin")  # UTC+1/+2, переходы есть
@@ -126,3 +126,21 @@ def test_wrong_weekday_is_not_in_window():
     now = datetime(2026, 10, 26, 14, 29, 0, tzinfo=UTC)  # понедельник
 
     assert moment_in_window(now, YEKBURG, Weekday.TUESDAY, time(19, 30)) is None
+
+
+def test_waiting_cutoff_defaults_to_local_midnight():
+    # 26.10 22:00 UTC = 27.10 03:00 в Екатеринбурге. Значит, окно ожидания
+    # началось в местную полночь 27.10, то есть 26.10 19:00 UTC.
+    now = datetime(2026, 10, 26, 22, 0, tzinfo=UTC)
+
+    cutoff = waiting_cutoff(now, YEKBURG, None)
+
+    assert cutoff == datetime(2026, 10, 26, 19, 0, tzinfo=UTC)
+
+
+def test_waiting_cutoff_uses_explicit_window_for_debugging():
+    now = datetime(2026, 10, 26, 22, 0, tzinfo=UTC)
+
+    cutoff = waiting_cutoff(now, YEKBURG, timedelta(hours=2))
+
+    assert cutoff == datetime(2026, 10, 26, 20, 0, tzinfo=UTC)
