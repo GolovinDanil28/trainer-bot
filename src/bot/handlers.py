@@ -8,6 +8,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.bot.access import owner_only
 from src.bot.service import WorkoutService
 
 
@@ -15,17 +16,20 @@ def _service(context: ContextTypes.DEFAULT_TYPE) -> WorkoutService:
     return context.bot_data["workout_service"]
 
 
+@owner_only
 async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/new strength Пн,Ср,Пт 19:30` — создать тренировку (R-01)."""
     text = update.message.text if update.message else ""
     await update.message.reply_text(_service(context).create_from_command(text or ""))
 
 
+@owner_only
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/list` — показать активные тренировки (R-02)."""
     await update.message.reply_text(_service(context).show_schedule())
 
 
+@owner_only
 async def cmd_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/off <id>` — выключить тренировку (R-03)."""
     arguments = context.args or []
@@ -35,6 +39,7 @@ async def cmd_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(_service(context).disable(arguments[0]))
 
 
+@owner_only
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/history` — последние записи журнала (R-13)."""
     await update.message.reply_text(_service(context).show_history())
