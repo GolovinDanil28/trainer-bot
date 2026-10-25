@@ -26,11 +26,31 @@ class CheckinAction(StrEnum):
     SKIP = "skip"
 
 
+class CheckinStatus(StrEnum):
+    """Что хранится в журнале.
+
+    Отличается от `CheckinAction` намеренно: в `callback_data` короткое `skip`
+    (design.md D4), а в истории — `skipped` (design.md D3). Это словари разных
+    слоёв, и путать их дороже, чем держать маппинг в одном месте.
+    """
+
+    DONE = "done"
+    SKIPPED = "skipped"
+
+
+CHECKIN_STATUS: dict[CheckinAction, CheckinStatus] = {
+    CheckinAction.DONE: CheckinStatus.DONE,
+    CheckinAction.SKIP: CheckinStatus.SKIPPED,
+}
+CHECKIN_STATUS_LABELS: dict[CheckinStatus, str] = {
+    CheckinStatus.DONE: "сделал",
+    CheckinStatus.SKIPPED: "пропустил",
+}
+
 # Подписи на кнопках. В callback_data всегда английские значения — подпись
 # можно менять без миграции данных.
 CHECKIN_LABELS: dict[CheckinAction, str] = {
-    CheckinAction.DONE: "сделал",
-    CheckinAction.SKIP: "пропустил",
+    action: CHECKIN_STATUS_LABELS[CHECKIN_STATUS[action]] for action in CheckinAction
 }
 
 CALLBACK_PREFIX = "ci"

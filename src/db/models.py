@@ -72,3 +72,22 @@ class Reminder(Base):
     attempts: Mapped[int] = mapped_column(default=0)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
+class Checkin(Base):
+    """Отметка пользователя: одна на напоминание.
+
+    `unique=True` на `reminder_id` — это и есть вся механика R-12: вторую
+    отметку не даст вставить сама база, а не проверка в коде, которая может
+    не успеть между двумя нажатиями.
+    """
+
+    __tablename__ = "checkin"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reminder_id: Mapped[int] = mapped_column(
+        ForeignKey("reminder.id", ondelete="CASCADE"), unique=True
+    )
+    # 'done' | 'skipped' — значения CheckinStatus, не CheckinAction.
+    status: Mapped[str] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))

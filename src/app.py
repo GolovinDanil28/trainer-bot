@@ -9,8 +9,10 @@ from datetime import timedelta
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
+from src.bot.access import OWNER_KEY
+from src.bot.callbacks import on_checkin
 from src.bot.handlers import cmd_list, cmd_new, cmd_off
 from src.bot.service import WorkoutService
 from src.bot.telegram_sender import TelegramSender
@@ -58,10 +60,11 @@ def build_tick(runtime: Runtime, sender: ReminderSender, settings: Settings) -> 
 
 
 def register_handlers(application: Application) -> None:
-    """Команды бота и их имена в Telegram."""
+    """Команды бота и кнопки под напоминаниями."""
     application.add_handler(CommandHandler("new", cmd_new))
     application.add_handler(CommandHandler("list", cmd_list))
     application.add_handler(CommandHandler("off", cmd_off))
+    application.add_handler(CallbackQueryHandler(on_checkin, pattern=r"^ci:"))
 
 
 def build_application(settings: Settings, runtime: Runtime | None = None) -> Application:
@@ -74,6 +77,8 @@ def build_application(settings: Settings, runtime: Runtime | None = None) -> App
         Application.builder().token(settings.bot_token.get_secret_value()).build()
     )
     application.bot_data["workout_service"] = runtime.service
+    # Один пользователь — один id. Все входы сверяются с ним (R-05).
+    application.bot_data[OWNER_KEY] = settings.owner_id
 
     async def start_scheduler(app: Application) -> None:
         # Отправитель создаётся здесь: `Bot` существует только после сборки

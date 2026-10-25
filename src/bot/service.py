@@ -8,11 +8,15 @@
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.messages import (
+    format_already_marked,
+    format_checkin_saved,
     format_created,
     format_disabled,
     format_schedule,
+    format_unknown_reminder,
     format_unknown_workout,
 )
+from src.core.reminders import CheckinAction
 from src.core.schedule import CommandError, parse_new_command
 from src.db import repository
 
@@ -51,3 +55,14 @@ class WorkoutService:
                 return format_unknown_workout(workout_id)
 
         return format_disabled(workout_id)
+
+    def record_checkin(self, reminder_id: int, action: CheckinAction) -> str:
+        """Нажатие кнопки → текст ответа. Журнал меняется только в первый раз."""
+        with self._session_factory() as session:
+            outcome = repository.record_checkin(session, reminder_id, action)
+
+        if outcome is None:
+            return format_unknown_reminder()
+        if outcome.created:
+            return format_checkin_saved(outcome.status)
+        return format_already_marked(outcome.status)

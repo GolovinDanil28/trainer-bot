@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import time
 from zoneinfo import ZoneInfo
 
-from src.core.reminders import ReminderMessage
+from src.core.reminders import CHECKIN_STATUS_LABELS, CheckinStatus, ReminderMessage
 from src.core.schedule import (
     WEEKDAY_SHORT,
     WORKOUT_TYPE_LABELS,
@@ -81,3 +81,18 @@ def format_reminder(message: ReminderMessage, zone: ZoneInfo) -> str:
         f"{message.duration_min} мин, {local_time}.\n"
         "Отметь результат кнопкой ниже."
     )
+
+
+def format_checkin_saved(status: CheckinStatus) -> str:
+    """Подтверждение отметки (R-11)."""
+    return f"Записал: {CHECKIN_STATUS_LABELS[status]}."
+
+
+def format_already_marked(status: CheckinStatus) -> str:
+    """Ответ на повторное нажатие: первая отметка не перезаписывается (R-12)."""
+    return f"Уже отмечено: {CHECKIN_STATUS_LABELS[status]}. Изменить нельзя."
+
+
+def format_unknown_reminder() -> str:
+    """Кнопка от старого или удалённого напоминания."""
+    return "Это напоминание больше не активно."

@@ -52,10 +52,34 @@ class FakeMessage:
         self.sent.append(text)
 
 
-def make_update(text: str = "") -> SimpleNamespace:
+class FakeCallbackQuery:
+    """Замена `telegram.CallbackQuery`: нажатие кнопки."""
+
+    def __init__(self, data: str = "") -> None:
+        self.data = data
+        self.answers: list[str] = []
+        self.markup_edits: list[object | None] = []
+
+    async def answer(self, text: str | None = None) -> None:
+        self.answers.append(text or "")
+
+    async def edit_message_reply_markup(self, reply_markup: object | None = None) -> None:
+        self.markup_edits.append(reply_markup)
+
+
+def make_update(text: str = "", user_id: int = 42) -> SimpleNamespace:
     return SimpleNamespace(
         message=FakeMessage(text),
-        effective_user=SimpleNamespace(id=42),
+        effective_user=SimpleNamespace(id=user_id),
+        callback_query=None,
+    )
+
+
+def make_callback_update(data: str, user_id: int = 42) -> SimpleNamespace:
+    return SimpleNamespace(
+        message=None,
+        effective_user=SimpleNamespace(id=user_id),
+        callback_query=FakeCallbackQuery(data),
     )
 
 

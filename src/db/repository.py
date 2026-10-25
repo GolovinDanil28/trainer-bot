@@ -5,15 +5,23 @@
 один commit.
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, time
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.core.reminders import ReminderMessage, ReminderStatus
+from src.core.reminders import (
+    CHECKIN_STATUS,
+    CheckinAction,
+    CheckinStatus,
+    ReminderMessage,
+    ReminderStatus,
+)
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutType, WorkoutView
-from src.db.models import Reminder, Schedule, Workout
+from src.db.models import Checkin, Reminder, Schedule, Workout
 
 
 def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
@@ -145,6 +153,49 @@ def mark_reminder_missed(session: Session, reminder_id: int, attempts: int) -> N
     _set_reminder_status(
         session, reminder_id, status=ReminderStatus.MISSED, attempts=attempts
     )
+
+
+@dataclass(frozen=True)
+class CheckinOutcome:
+    """Результат нажатия: что теперь в журнале и создали ли запись мы."""
+
+    status: CheckinStatus
+    created: bool
+
+
+def record_checkin(
+    session: Session, reminder_id: int, action: CheckinAction
+) -> CheckinOutcome | None:
+    """Записать отметку. Возвращает `None`, если напоминания нет.
+
+    Первая отметка выигрывает: вторая не перезаписывает журнал (R-12). Гонку
+    двух одновременных нажатий закрывает UNIQUE на `checkin.reminder_id`,
+    а `IntegrityError` здесь — ожидаемый исход, а не ошибка.
+    """
+    reminder = session.get(Reminder, reminder_id)
+    if reminder is None:
+        return None
+
+    existing = _find_checkin(session, reminder_id)
+    if existing is not None:
+        return CheckinOutcome(CheckinStatus(existing.status), created=False)
+
+    session.add(Checkin(reminder_id=reminder_id, status=CHECKIN_STATUS[action].value))
+    reminder.status = ReminderStatus.ANSWERED.value
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        existing = _find_checkin(session, reminder_id)
+        if existing is None:  # pragma: no cover — значит, упало не на UNIQUE
+            raise
+        return CheckinOutcome(CheckinStatus(existing.status), created=False)
+
+    return CheckinOutcome(CHECKIN_STATUS[action], created=True)
+
+
+def _find_checkin(session: Session, reminder_id: int) -> Checkin | None:
+    return session.scalar(select(Checkin).where(Checkin.reminder_id == reminder_id))
 
 
 def _set_reminder_status(
