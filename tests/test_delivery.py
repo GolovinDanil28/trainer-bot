@@ -4,6 +4,7 @@
 не останавливается, зависшие переводятся в missed.
 """
 
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -136,3 +137,30 @@ async def test_mixed_success_and_missed(
         assert r2.status == ReminderStatus.MISSED.value
         assert r1.attempts == 1
         assert r2.attempts == 3
+
+async def test_failed_attempts_are_logged(session_factory, caplog, now):
+    """R-09: без записи в лог причина missed не восстанавливается."""
+    from src.core.schedule import Weekday, WorkoutDraft, WorkoutType
+    from src.db import repository
+
+    draft = WorkoutDraft(
+        workout_type=WorkoutType.STRENGTH,
+        weekdays=(Weekday.MONDAY,),
+        time_of_day=datetime(2026, 10, 26, 19, 30).time(),
+        duration_min=45,
+    )
+    with session_factory() as session:
+        workout_id = repository.create_workout(session, draft).id
+        reminder_id = repository.claim_reminder(session, workout_id, now)
+
+    transport = FakeSender(fail_for={reminder_id})
+    delivery = ReminderDelivery(session_factory, transport, max_attempts=MAX_ATTEMPTS)
+
+    with caplog.at_level(logging.WARNING, logger="src.scheduler.delivery"):
+        report = await delivery.deliver([reminder_id], now)
+
+    assert report.missed == [reminder_id]
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == MAX_ATTEMPTS
+    assert all(str(reminder_id) in record.getMessage() for record in warnings)
+    assert "не доставляется" in warnings[0].getMessage()

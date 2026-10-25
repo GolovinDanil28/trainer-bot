@@ -80,9 +80,9 @@ trainer-bot/
 
 | Этап | Состояние |
 |---|---|
-| Спецификация | `trainer-bot-schedule` утверждена: расписание, доставка, отметки |
-| Реализация | каркас проекта, 1 из 21 задачи |
-| Тесты | smoke-тесты каркаса |
+| Спецификация | `openspec/specs/`: `trainer-bot-schedule`, `trainer-bot-delivery`, `trainer-bot-checkin` |
+| Реализация | MVP: расписание, доставка, отметки, журнал; change `trainer-bot-schedule` в архиве |
+| Тесты | домен, доставка и бот покрыты тестами; запуск — `pytest -q` |
 | Деплой | нет |
 | Следующая спека | `trainer-bot-wellness-plan` — чек-ин самочувствия и правила плана |
 
@@ -90,5 +90,5 @@ trainer-bot/
 
 - `AGENTS.md` — правила: обучение, spec-first, границы работы;
 - `openspec/project.md` — стек, соглашения и типичные грабли;
-- `openspec/changes/` — текущие изменения и их задачи;
+- `openspec/changes/` — активные изменения; завершённые лежат в `changes/archive/`;
 - `learning/LOG.md` — журнал решений и понятых концепций.

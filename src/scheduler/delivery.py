@@ -5,6 +5,7 @@
 `ReminderSender`, поэтому весь цикл проверяется `FakeSender`-ом, без Telegram.
 """
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -13,6 +14,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.reminders import ReminderSender
 from src.db import repository
+
+logger = logging.getLogger(__name__)
 
 # Три попытки — компромисс: две слишком мало (один таймаут — и напоминания нет),
 # пять растягивают тик на минуты, если Telegram лежит целиком.
@@ -64,10 +67,19 @@ class ReminderDelivery:
             attempts += 1
             try:
                 await self._sender.send(message)
-            except Exception:
+            except Exception as exc:
                 # Ловим всё: транспорт падает чем угодно — таймаутом, обрывом,
                 # 502 от Telegram. Одно упавшее напоминание не должно ронять тик,
                 # иначе следующие тренировки молча остаются без напоминаний.
+                # Пишем в лог: без записи «missed» выглядит как случайность,
+                # и причину потом не восстановить (R-09).
+                logger.warning(
+                    "напоминание %s: попытка %s из %s не удалась: %s",
+                    reminder_id,
+                    attempts,
+                    self._max_attempts,
+                    exc,
+                )
                 continue
 
             with self._session_factory() as session:
