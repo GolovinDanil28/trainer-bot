@@ -9,11 +9,12 @@ from datetime import timedelta
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler
+from telegram import Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler
 
 from src.bot.access import OWNER_KEY
 from src.bot.callbacks import on_checkin
-from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off
+from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off, on_free_text
 from src.bot.service import WorkoutService
 from src.bot.telegram_sender import TelegramSender
 from src.config import Settings
@@ -66,6 +67,9 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("off", cmd_off))
     application.add_handler(CommandHandler("history", cmd_history))
     application.add_handler(CallbackQueryHandler(on_checkin, pattern=r"^ci:"))
+    # Свободный текст принимаем только от владельца (проверка внутри on_free_text)
+    application.add_handler(MessageHandler(lambda update, context: True, on_free_text))
+
 
 
 def build_application(settings: Settings, runtime: Runtime | None = None) -> Application:
