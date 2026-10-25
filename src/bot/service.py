@@ -48,6 +48,15 @@ class WorkoutService:
         with self._session_factory() as session:
             return format_schedule(repository.list_active(session))
 
+    def schedule_snapshot(self) -> str:
+        """Возвращает читаемый снапшот текущих активных тренировок.
+
+        Не изменяет состояние БД. Может использоваться при построении
+        пользовательского промпта (D3.4).
+        """
+        with self._session_factory() as session:
+            return format_schedule(repository.list_active(session))
+
     def disable(self, raw_id: str) -> str:
         """`/off <id>` → текст подтверждения или текст ошибки."""
         try:

@@ -85,3 +85,46 @@ def make_callback_update(data: str, user_id: int = 42) -> SimpleNamespace:
 
 def make_context(bot_data: dict, args: list[str] | None = None) -> SimpleNamespace:
     return SimpleNamespace(bot_data=bot_data, args=args or [])
+
+
+DEFAULT_JSON = '{"action":"none","type":null,"days":null,"time":null,"workout_id":null}'
+
+
+class LLMError(RuntimeError):
+    """Модель недоступна или ответила не тем, что умеем разобрать."""
+
+
+class FakeLLM:
+    """Подделка IntentTranslator: возвращает JSON-ответы или бросает ошибку.
+
+    Режимы (mode):
+    - "ok"          — возвращает ответ из словаря answers по тексту
+    - "timeout"     — вызывает TimeoutError
+    - "unreachable" — вызывает LLMError
+    - "invalid_json" — возвращает строку, которая не валидна JSON
+    """
+
+    def __init__(
+        self,
+        answers: dict[str, str] | None = None,
+        mode: str = "ok",
+        default: str | None = None,
+    ) -> None:
+        self.answers = answers or {}
+        self.mode = mode
+        self.default = default or DEFAULT_JSON
+        self.calls: list[tuple[str, str]] = []
+
+    async def intent_json(self, text: str, schedule_hint: str) -> str:
+        """Вернуть JSON-строку (или бросить ошибку)."""
+        self.calls.append((text, schedule_hint))
+        if self.mode == "timeout":
+            raise TimeoutError("таймаут ожидания ответа от модели")
+        if self.mode == "unreachable":
+            raise LLMError("Ollama недоступна: соединение разорвано")
+        if self.mode == "invalid_json":
+            return "не валидный JSON"
+        return self.answers.get(
+            text,
+            self.default,
+        )
