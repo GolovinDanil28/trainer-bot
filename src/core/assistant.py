@@ -7,8 +7,8 @@
 - `parse_intent(raw_json)` — функция, которая принимает JSON-строку от модели
   и возвращает структурированное намерение или поднимает ошибку.
 
-Никто Besides `bot/assistant_service.py` импортирует этот модуль напрямую;
-все остальное взаимодействие идет через протокол `IntentTranslator`.
+Модуль не знает ни про Telegram, ни про сеть: промпты и разбор ответа —
+чистые функции, поэтому проверяются без Ollama.
 """
 
 from __future__ import annotations
@@ -19,6 +19,35 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from src.core.schedule import WEEKDAY_ALIASES, Weekday, WorkoutType
+
+# Проверка «опоры на текст»: модель не имеет права добавлять поля, которых
+# в фразе нет. Это дешевле и надёжнее, чем надеяться на 7B-модель (R-15).
+_TYPE_WORDS: dict[WorkoutType, re.Pattern[str]] = {
+    WorkoutType.STRENGTH: re.compile(r"\b(силов\w*|strength)\b", re.IGNORECASE),
+    WorkoutType.CARDIO: re.compile(r"\b(кардио|cardio)\b", re.IGNORECASE),
+    WorkoutType.MOBILITY: re.compile(
+        r"\b(мобильн\w*|растяжк\w*|mobility)\b", re.IGNORECASE
+    ),
+}
+_WEEKDAY_WORD = re.compile(
+    r"\b(пн|вт|ср|чт|пт|сб|вс|понед\w*|вторн\w*|сред\w*|четвер\w*|"
+    r"пятн\w*|суббот\w*|воскрес\w*)\b",
+    re.IGNORECASE,
+)
+_EVERY_DAY = re.compile(
+    r"\bкажд\w*\s+(день|дня|вечер\w*)\b|\bежедневн\w*\b", re.IGNORECASE
+)
+_TIME_WORD = re.compile(
+    # Точное время: цифры ЧЧ:ММ, отдельное число, числительное или «половина».
+    # Одно «утром» точным временем не считается — иначе модель подставит 08:00.
+    r"\d{1,2}[:.]\d{2}|\b\d{1,2}\b|"
+    r"\b(половин\w*|один|два|три|четыре|пять|шесть|семь|восемь|девять|десять|"
+    r"одиннадцать|двенадцать|час\w*)\b",
+    re.IGNORECASE,
+)
+_REMOVE_WORD = re.compile(
+    r"\b(убер\w*|удал\w*|выключ\w*|отключ\w*|сним\w*)\b", re.IGNORECASE
+)
 
 
 class IntentError(Exception):
@@ -110,7 +139,26 @@ def _validate_days(days_raw: object) -> list[Weekday]:
     return sorted(result)
 
 
-def parse_intent(raw_json: str) -> AssistantIntent:
+def _ensure_grounded(intent: AssistantIntent, text: str) -> None:
+    """Запретить модели добавлять поля, которых нет в тексте (R-15).
+
+    Валидация значений ловит «25:00», но не выдуманное время на фразе без
+    времени. Проверка опоры на текст превращает такую выдумку в отказ, а не в
+    запись, которую пользователь не просил.
+    """
+    if intent.action is AssistantAction.CREATE:
+        if intent.type is None or not _TYPE_WORDS[intent.type].search(text):
+            raise IntentError("В тексте не назван тип тренировки")
+        if not _WEEKDAY_WORD.search(text) and not _EVERY_DAY.search(text):
+            raise IntentError("В тексте не названы дни недели")
+        if not _TIME_WORD.search(text):
+            raise IntentError("В тексте нет точного времени")
+    elif intent.action is AssistantAction.OFF:
+        if not _REMOVE_WORD.search(text):
+            raise IntentError("В тексте нет просьбы убрать тренировку")
+
+
+def parse_intent(raw_json: str, text: str | None = None) -> AssistantIntent:
     """Парсить JSON-ответ модели и возвращать структурированное намерение.
 
     Args:
@@ -168,7 +216,12 @@ def parse_intent(raw_json: str) -> AssistantIntent:
                 "Для действия create обязательно поле type (strength/cardio/mobility)."
             )
         if ar_days is None:
-            raise IntentError("Для действия create обязательно поле days.")
+            # «Каждый день» + точное время — это все семь дней; без явных дней
+            # и без этой фразы create неполон (R-14, сценарий из корпуса).
+            if text is not None and _EVERY_DAY.search(text):
+                ar_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+            else:
+                raise IntentError("Для действия create обязательно поле days.")
         days = _validate_days(ar_days)
         if ar_time is None:
             raise IntentError("Для действия create обязательно поле time.")
@@ -203,7 +256,7 @@ def parse_intent(raw_json: str) -> AssistantIntent:
         # Недостижимый случай, так как action проверяется через enum выше
         raise IntentError("Внутренняя ошибка: неизвестное действие после проверки enum")
 
-    return AssistantIntent(
+    result = AssistantIntent(
         action=action,
         type=wtype,
         days=days,
@@ -211,3 +264,61 @@ def parse_intent(raw_json: str) -> AssistantIntent:
         workout_id=workout_id,
         reason=str(ar_reason) if ar_reason is not None else "",
     )
+    if text is not None:
+        _ensure_grounded(result, text)
+    return result
+
+
+_SYSTEM_PROMPT = """Ты переводишь фразу владельца про недельное расписание тренировок в JSON.
+Отвечай только JSON-объектом, без пояснений и без markdown.
+
+Поля:
+- action: "create" | "list" | "off" | "none"
+- type: "strength" | "cardio" | "mobility" (мобильность, растяжка) | null
+- days: массив дней из ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"] или null
+- time: "ЧЧ:ММ" в 24-часовом формате или null
+- workout_id: целое число или null
+- reason: короткое объяснение по-русски
+
+Как выбирать action:
+- create — в тексте есть тип, дни недели и точное время.
+- list — просьба показать расписание.
+- off — просьба убрать тренировку. workout_id бери из текущего расписания:
+  «вторая тренировка» — это строка с номером 2 в списке, а не второй день.
+- none — всё остальное.
+
+Проверка перед create, все четыре пункта обязательны:
+1. Тип назван словом из списка? Нет — none.
+2. Дни недели названы? Нет — none.
+3. Время точное, с часами и минутами? Нет — none.
+4. Тип, дни и время взяты из текста, а не из расписания и не «по смыслу»?
+   Нет — none. Расписание нужно только для off: не копируй из него поля.
+
+Что всегда none:
+- разовый перенос;
+- замена одной тренировки другой;
+- самочувствие и общие вопросы;
+- повторение, невыразимое днями недели: «по чётным дням», «раз в две недели»;
+- время без минут: «утром», «вечером», «днём»;
+- несколько действий в одной фразе — верни только первое.
+
+Время:
+- только 24 часа: «в восемь утра» → "08:00", «в семь вечера» → "19:00";
+- «половина седьмого вечера» → "18:30";
+- «каждый день» или «ежедневно» вместе с точным временем — все семь дней;
+- слово «утром» или «вечером» рядом с точным временем не мешает create.
+
+При сомнении всегда возвращай none. Ложное действие хуже отказа."""
+
+EMPTY_SCHEDULE_HINT = "Расписание пусто."
+
+
+def build_system_prompt() -> str:
+    """System-промпт: контракт полей, правило отказа и пример-якорь времени."""
+    return _SYSTEM_PROMPT
+
+
+def build_user_prompt(text: str, schedule_hint: str) -> str:
+    """User-промпт: текст сообщения и read-only снапшот расписания (D4)."""
+    snapshot = schedule_hint.strip() or EMPTY_SCHEDULE_HINT
+    return f"Текущее расписание:\n{snapshot}\n\nСообщение владельца:\n{text.strip()}"

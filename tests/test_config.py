@@ -9,6 +9,29 @@ from pydantic import ValidationError
 
 from src.config import Settings
 
+_ENV_NAMES = (
+    "BOT_TOKEN",
+    "OWNER_ID",
+    "TZ",
+    "DB_URL",
+    "MISS_WINDOW_HOURS",
+    "OLLAMA_URL",
+    "OLLAMA_MODEL",
+    "OLLAMA_TIMEOUT_SECONDS",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch):
+    """Убрать переменные окружения: иначе тест зависит от `.env` машины.
+
+    `_env_file=None` отключает только файл, а `os.environ` pydantic-settings
+    читает всё равно — при запуске из каталога с загруженным `.env` тесты на
+    дефолты падали бы «на пустом месте».
+    """
+    for name in _ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
 
 def make_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {"bot_token": "123:test", "owner_id": 42}

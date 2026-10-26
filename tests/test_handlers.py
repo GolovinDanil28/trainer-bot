@@ -9,9 +9,10 @@ import pytest
 from sqlalchemy import func, select
 
 from src.bot.access import OWNER_KEY, REFUSAL_TEXT
-from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off
+from src.bot.assistant_service import AssistantService
+from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off, on_free_text
 from src.db.models import Workout
-from tests.fakes import make_context, make_update
+from tests.fakes import FakeBot, FakeLLM, make_context, make_update
 
 OWNER_ID = 42
 
@@ -97,3 +98,53 @@ async def test_stranger_gets_same_neutral_refusal(
     with session_factory() as session:
         assert session.scalar(select(func.count()).select_from(Workout)) == 0
     assert "трениров" not in REFUSAL_TEXT.lower()
+
+
+def free_text_context(service, llm, bot):
+    assistant = AssistantService(llm, service, "qwen2.5:7b", 5)
+    return make_context(
+        {"assistant_service": assistant, OWNER_KEY: OWNER_ID},
+        bot=bot,
+    )
+
+
+async def test_free_text_owner_gets_answer_and_typing_first(service):
+    phrase = "покажи расписание"
+    llm = FakeLLM(answers={phrase: '{"action":"list"}'})
+    events: list[str] = []
+    update = make_update(phrase, events=events)
+    bot = FakeBot(events)
+
+    await on_free_text(update, free_text_context(service, llm, bot))
+
+    assert update.message.sent == [service.show_schedule()]
+    assert llm.calls == [(phrase, service.schedule_snapshot())]
+    # «Печатает…» уходит до ответа, а не после (R-17).
+    assert events == ["typing", "reply"]
+    assert bot.actions == [(update.message.chat_id, "typing")]
+
+
+async def test_free_text_stranger_does_not_call_model(service, session_factory):
+    llm = FakeLLM(answers={"покажи расписание": '{"action":"list"}'})
+    update = make_update("покажи расписание", user_id=999)
+    bot = FakeBot()
+
+    await on_free_text(update, free_text_context(service, llm, bot))
+
+    assert update.message.sent == [REFUSAL_TEXT]
+    assert llm.calls == []
+    assert bot.actions == []
+    with session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(Workout)) == 0
+
+
+async def test_free_text_ignores_commands(service):
+    llm = FakeLLM()
+    update = make_update("/list")
+    bot = FakeBot()
+
+    await on_free_text(update, free_text_context(service, llm, bot))
+
+    assert update.message.sent == []
+    assert llm.calls == []
+    assert bot.actions == []

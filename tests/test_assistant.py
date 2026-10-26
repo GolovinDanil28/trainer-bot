@@ -9,6 +9,8 @@ import pytest
 from src.core.assistant import (
     AssistantAction,
     IntentError,
+    build_system_prompt,
+    build_user_prompt,
     parse_intent,
 )
 from src.core.schedule import Weekday, WorkoutType
@@ -110,3 +112,94 @@ def test_parse_intent_sorts_and_deduplicates_days():
     )
     from src.core.schedule import Weekday
     assert result.days == [Weekday.MONDAY, Weekday.FRIDAY]
+
+
+def test_system_prompt_has_contract_and_time_anchor():
+    prompt = build_system_prompt()
+
+    assert "action" in prompt
+    assert "workout_id" in prompt
+    # Пример-якорь из D4: без него «половина седьмого вечера» уходит в 19:30.
+    assert "половина седьмого вечера" in prompt.lower()
+    assert "18:30" in prompt
+    assert "none" in prompt
+
+
+def test_user_prompt_contains_text_and_snapshot():
+    prompt = build_user_prompt("убери вторую тренировку", "#1 — силовая, Пн 19:30")
+
+    assert "убери вторую тренировку" in prompt
+    assert "#1 — силовая, Пн 19:30" in prompt
+
+
+def test_user_prompt_marks_empty_schedule():
+    prompt = build_user_prompt("покажи расписание", "   ")
+
+    assert "расписание пусто" in prompt.lower()
+
+
+@pytest.mark.parametrize(
+    ("raw_json", "text"),
+    [
+        pytest.param(
+            '{"action":"create","type":"mobility","days":["Ср"],"time":"08:00"}',
+            "мобильность в среду утром",
+            id="vague-time",
+        ),
+        pytest.param(
+            '{"action":"create","type":"cardio","days":["Вт"],"time":"12:00"}',
+            "хочу тренироваться по вторникам в 12:00",
+            id="invented-type",
+        ),
+        pytest.param(
+            '{"action":"create","type":"strength","days":["Пн"],"time":"19:30"}',
+            "силовая завтра",
+            id="invented-time-and-days",
+        ),
+        pytest.param(
+            '{"action":"off","workout_id":2}', "завтра не смогу", id="off-without-verb"
+        ),
+        pytest.param(
+            '{"action":"off","workout_id":1}',
+            "в пятницу вместо силовой будет кардио",
+            id="replacement-as-off",
+        ),
+    ],
+)
+def test_grounding_rejects_fields_not_in_text(raw_json, text):
+    # Модель не имеет права добавлять тип, дни или время, которых нет в фразе.
+    with pytest.raises(IntentError):
+        parse_intent(raw_json, text)
+
+
+@pytest.mark.parametrize(
+    ("raw_json", "text"),
+    [
+        pytest.param(
+            '{"action":"create","type":"cardio","days":["Вт"],"time":"08:00"}',
+            "кардио по вторникам в восемь утра",
+            id="spoken-time",
+        ),
+        pytest.param(
+            '{"action":"create","type":"mobility","days":["Вс"],"time":"21:00"}',
+            "напоминай про растяжку каждый вечер в 21:00",
+            id="stretch-synonym",
+        ),
+        pytest.param(
+            '{"action":"off","workout_id":2}', "убери вторую тренировку", id="off-verb"
+        ),
+    ],
+)
+def test_grounding_accepts_real_phrases(raw_json, text):
+    intent = parse_intent(raw_json, text)
+
+    assert intent.action is not None
+
+
+def test_every_day_fills_all_weekdays():
+    intent = parse_intent(
+        '{"action":"create","type":"cardio","time":"07:00"}',
+        "кардио каждый день в 7:00",
+    )
+
+    assert intent.days == list(Weekday)

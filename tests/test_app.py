@@ -6,9 +6,10 @@ Telegram не поднимается: приложение инициализи�
 
 from pathlib import Path
 
-from telegram.ext import CommandHandler
+from telegram.ext import CommandHandler, MessageHandler
 
 from src.app import build_application
+from src.bot.handlers import on_free_text
 from src.config import Settings
 from src.scheduler.runner import JOB_ID
 
@@ -34,6 +35,22 @@ def test_application_registers_commands(tmp_path):
     }
 
     assert commands == {"new", "list", "off", "history"}
+
+
+def test_application_registers_free_text_once_and_builds_assistant(tmp_path):
+    application = build_application(make_settings(tmp_path))
+
+    free_text = [
+        handler
+        for group in application.handlers.values()
+        for handler in group
+        if isinstance(handler, MessageHandler)
+    ]
+
+    assert len(free_text) == 1
+    assert free_text[0].callback is on_free_text
+    assert "assistant_service" in application.bot_data
+    assert "workout_service" in application.bot_data
 
 
 async def test_start_hook_registers_running_job_and_stop_hook_cleans_up(tmp_path):

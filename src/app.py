@@ -9,10 +9,16 @@ from datetime import timedelta
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from telegram import Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 from src.bot.access import OWNER_KEY
+from src.bot.assistant_service import AssistantService
 from src.bot.callbacks import on_checkin
 from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off, on_free_text
 from src.bot.service import WorkoutService
@@ -20,6 +26,7 @@ from src.bot.telegram_sender import TelegramSender
 from src.config import Settings
 from src.core.reminders import ReminderSender
 from src.db.session import create_db_engine, init_db, make_session_factory
+from src.llm.ollama import OllamaClient
 from src.scheduler.runner import build_scheduler
 from src.scheduler.tick import SchedulerTick
 
@@ -67,8 +74,11 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("off", cmd_off))
     application.add_handler(CommandHandler("history", cmd_history))
     application.add_handler(CallbackQueryHandler(on_checkin, pattern=r"^ci:"))
-    # Свободный текст принимаем только от владельца (проверка внутри on_free_text)
-    application.add_handler(MessageHandler(lambda update, context: True, on_free_text))
+    # Свободный текст — только сообщения, не команды; владельца проверяет
+    # `owner_only` внутри хендлера (R-18).
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, on_free_text)
+    )
 
 
 
@@ -82,6 +92,19 @@ def build_application(settings: Settings, runtime: Runtime | None = None) -> App
         Application.builder().token(settings.bot_token.get_secret_value()).build()
     )
     application.bot_data["workout_service"] = runtime.service
+    # Свободный текст: клиент, таймаут и домен-операции — по D1/D7. Клиент не
+    # ходит в сеть до первого сообщения, поэтому старт без Ollama безопасен.
+    translator = OllamaClient(
+        settings.ollama_url,
+        settings.ollama_model,
+        settings.ollama_timeout_seconds,
+    )
+    application.bot_data["assistant_service"] = AssistantService(
+        translator,
+        runtime.service,
+        settings.ollama_model,
+        settings.ollama_timeout_seconds,
+    )
     # Один пользователь — один id. Все входы сверяются с ним (R-05).
     application.bot_data[OWNER_KEY] = settings.owner_id
 
