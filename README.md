@@ -130,11 +130,11 @@ trainer-bot/
 
 | Этап | Состояние |
 |---|---|
-| Спецификация | `openspec/specs/`: `trainer-bot-schedule`, `trainer-bot-delivery`, `trainer-bot-checkin`, `trainer-bot-assistant`; `wellness` и `plan` — в change `trainer-bot-wellness-plan` |
-| Реализация | MVP: расписание, доставка, отметки, журнал, свободный текст, самочувствие и план на завтра; changes `trainer-bot-schedule` и `trainer-bot-nl-schedule` в архиве |
+| Спецификация | `openspec/specs/`: `trainer-bot-schedule`, `trainer-bot-delivery`, `trainer-bot-checkin`, `trainer-bot-assistant`, `trainer-bot-wellness`, `trainer-bot-plan` |
+| Реализация | MVP: расписание, доставка, отметки, журнал, свободный текст, самочувствие и план на завтра; changes `trainer-bot-schedule`, `trainer-bot-nl-schedule` и `trainer-bot-wellness-plan` в архиве |
 | Тесты | домен, доставка, бот, LLM-слой и план покрыты тестами; запуск — `pytest -q`; живой прогон — `RUN_OLLAMA_TESTS=1 pytest -q` |
 | Деплой | нет |
-| Следующая спека | после архивации `trainer-bot-wellness-plan` — недельные сводки или отмена напоминания по плану (решается по факту использования) |
+| Следующая спека | недельные сводки или отмена напоминания по плану — решается по факту двух недель использования |
 
 ## Документация
 
