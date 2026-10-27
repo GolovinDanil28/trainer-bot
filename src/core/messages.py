@@ -8,8 +8,16 @@ from collections.abc import Sequence
 from datetime import time
 from zoneinfo import ZoneInfo
 
+from src.core.help import COMMANDS, FREE_TEXT_EXAMPLES, HELP_TRIGGER_HINT
 from src.core.history import HistoryEntry
-from src.core.plan import DayPlan
+from src.core.plan import (
+    DURATION_STEP_MIN,
+    LIGHT_SCORE,
+    MIN_DURATION_MIN,
+    REDUCTION_PERCENT,
+    REST_MAX_SCORE,
+    DayPlan,
+)
 from src.core.reminders import CHECKIN_STATUS_LABELS, CheckinStatus, ReminderMessage
 from src.core.schedule import (
     WEEKDAY_SHORT,
@@ -147,6 +155,58 @@ def format_assistant_unclear() -> str:
         "Понимаю фразы вроде: «кардио по вторникам и четвергам в восемь утра», "
         "«покажи расписание», «убери вторую тренировку».\n"
         "Строгие команды: /new, /list, /off."
+    )
+
+
+# --- справка (R-28…R-31) --------------------------------------------------
+
+# Правила собираются из констант плана, а не пишутся текстом: иначе изменение
+# правила в `core/plan.py` оставит карточку врать — молча.
+HELP_PLAN_RULES = (
+    f"Правила плана: 1–{REST_MAX_SCORE} — отдых, {LIGHT_SCORE} — "
+    f"{100 - REDUCTION_PERCENT} % длительности "
+    f"(вниз до {DURATION_STEP_MIN} минут, но не меньше {MIN_DURATION_MIN}), "
+    f"{LIGHT_SCORE + 1}–5 — как в расписании.\n"
+    "План не отменяет напоминание: при отдыхе отметь его «пропустил»."
+)
+
+HELP_LIMITS = (
+    "Чего не умею:\n"
+    "— разовые переносы («завтра не смогу»);\n"
+    "— тренировку на конкретную дату, только недельное расписание;\n"
+    "— несколько действий в одной фразе;\n"
+    "— недельный разбор и план на следующую неделю;\n"
+    "— свободный текст без Ollama."
+)
+
+
+def format_help() -> str:
+    """Карточка возможностей (R-28).
+
+    Строится из `COMMANDS`, а не пишется строкой: иначе новая команда появится
+    в боте и исчезнет из справки — молча.
+    """
+    lines = ["Что я умею", ""]
+    triggers = ", ".join(f"«{trigger}»" for trigger in HELP_TRIGGER_HINT)
+    lines.append(f"Справку можно попросить словами: {triggers}.")
+    lines.extend(["", "Команды:"])
+    for entry in COMMANDS:
+        lines.append(f"{entry.command} — {entry.purpose}")
+        lines.append(f"  {entry.example}")
+
+    lines.extend(["", "Можно фразой:"])
+    for phrase, meaning in FREE_TEXT_EXAMPLES:
+        lines.append(f"  «{phrase}» → {meaning}")
+
+    lines.extend(["", HELP_PLAN_RULES, "", HELP_LIMITS])
+    return "\n".join(lines)
+
+
+def format_start() -> str:
+    """/start: приветствие и та же карточка, что у /help (R-28)."""
+    return (
+        "Привет! Я напоминаю о тренировках, веду журнал и собираю план "
+        "по самочувствию.\n\n" + format_help()
     )
 
 

@@ -12,6 +12,8 @@ from telegram.ext import ContextTypes
 from src.bot.access import owner_only
 from src.bot.service import WorkoutService
 from src.bot.wellness_service import WellnessService
+from src.core.help import is_help_request
+from src.core.messages import format_help, format_start
 
 
 def _service(context: ContextTypes.DEFAULT_TYPE) -> WorkoutService:
@@ -27,6 +29,18 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/new strength Пн,Ср,Пт 19:30` — создать тренировку (R-01)."""
     text = update.message.text if update.message else ""
     await update.message.reply_text(_service(context).create_from_command(text or ""))
+
+
+@owner_only
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/start` — приветствие и карточка возможностей (R-28)."""
+    await update.message.reply_text(format_start())
+
+
+@owner_only
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/help` — карточка возможностей (R-28)."""
+    await update.message.reply_text(format_help())
 
 
 @owner_only
@@ -74,6 +88,12 @@ async def on_free_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Фильтр уже отсекает команды, но хендлер обязан быть безопасным и сам:
     # пустое сообщение или `/start` не должны уходить в модель.
     if not text or text.startswith("/"):
+        return
+
+    # Справка — вход, а не запрос к модели: она обязана работать при выключенной
+    # Ollama и отвечать мгновенно (R-29, R-30).
+    if is_help_request(text):
+        await message.reply_text(format_help())
         return
 
     # «Печатает…» — до ожидания модели: при T=20 пользователь видит, что бот
