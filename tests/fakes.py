@@ -9,6 +9,7 @@ from collections import Counter
 from types import SimpleNamespace
 
 from src.core.reminders import ReminderMessage
+from src.core.wellness import WellnessPrompt
 from src.llm.protocol import LLMError
 
 __all__ = [
@@ -18,8 +19,10 @@ __all__ = [
     "FakeCallbackQuery",
     "FakeLLM",
     "FakeMessage",
+    "FakePromptSender",
     "FakeSender",
     "LLMError",
+    "PromptFailed",
     "make_callback_update",
     "make_context",
     "make_update",
@@ -56,6 +59,26 @@ class FakeSender:
         self.sent.append(message)
 
 
+class PromptFailed(RuntimeError):
+    """Имитация ошибки Telegram при отправке вечернего вопроса."""
+
+
+class FakePromptSender:
+    """Транспорт вечернего вопроса: записывает отправленное и умеет падать."""
+
+    def __init__(self, failures: int = 0) -> None:
+        self._failures_left = failures
+        self.sent: list[WellnessPrompt] = []
+        self.attempts = 0
+
+    async def send_prompt(self, prompt: WellnessPrompt) -> None:
+        self.attempts += 1
+        if self._failures_left > 0:
+            self._failures_left -= 1
+            raise PromptFailed("Telegram недоступен")
+        self.sent.append(prompt)
+
+
 class FakeMessage:
     """Замена `telegram.Message`: хендлеру нужны `text`, `chat_id` и `reply_text`.
 
@@ -75,15 +98,23 @@ class FakeMessage:
 
 
 class FakeBot:
-    """Замена `telegram.Bot`: записывает действия в чат («печатает…»)."""
+    """Замена `telegram.Bot`: записывает действия в чат и отправленные сообщения."""
 
     def __init__(self, events: list[str] | None = None) -> None:
         self.actions: list[tuple[int, str]] = []
+        self.messages: list[dict] = []
         self.events = events if events is not None else []
 
     async def send_chat_action(self, chat_id: int, action: str) -> None:
         self.actions.append((chat_id, action))
         self.events.append("typing")
+
+    async def send_message(
+        self, chat_id: int, text: str, reply_markup: object | None = None
+    ) -> None:
+        self.messages.append(
+            {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
+        )
 
 
 class FakeCallbackQuery:
@@ -92,10 +123,18 @@ class FakeCallbackQuery:
     def __init__(self, data: str = "") -> None:
         self.data = data
         self.answers: list[str] = []
+        self.text_edits: list[str] = []
+        self.text_edit_markups: list[object | None] = []
         self.markup_edits: list[object | None] = []
 
     async def answer(self, text: str | None = None) -> None:
         self.answers.append(text or "")
+
+    async def edit_message_text(
+        self, text: str, reply_markup: object | None = None
+    ) -> None:
+        self.text_edits.append(text)
+        self.text_edit_markups.append(reply_markup)
 
     async def edit_message_reply_markup(self, reply_markup: object | None = None) -> None:
         self.markup_edits.append(reply_markup)

@@ -4,8 +4,11 @@
 поэтому проверять его можно как структуру данных.
 """
 
-from src.bot.keyboards import reminder_keyboard
+from datetime import date
+
+from src.bot.keyboards import reminder_keyboard, wellness_keyboard
 from src.core.reminders import CheckinAction, parse_checkin_callback
+from src.core.wellness import parse_wellness_callback
 
 
 def test_reminder_keyboard_is_one_row_with_two_buttons():
@@ -39,3 +42,18 @@ def test_every_button_of_the_keyboard_is_parsable():
 
         assert reminder_id == 21
         assert action in CheckinAction
+
+
+def test_wellness_keyboard_has_five_scores_in_one_row():
+    rows = wellness_keyboard(date(2026, 10, 27)).inline_keyboard
+
+    assert len(rows) == 1
+    assert [button.text for button in rows[0]] == ["1", "2", "3", "4", "5"]
+
+
+def test_wellness_keyboard_callbacks_carry_day_and_score():
+    for button in wellness_keyboard(date(2026, 10, 27)).inline_keyboard[0]:
+        day, score = parse_wellness_callback(button.callback_data)
+
+        assert day == date(2026, 10, 27)
+        assert score in (1, 2, 3, 4, 5)

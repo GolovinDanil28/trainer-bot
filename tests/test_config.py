@@ -4,6 +4,8 @@
 настоящий .env разработчика и результат зависел бы от машины.
 """
 
+from datetime import time
+
 import pytest
 from pydantic import ValidationError
 
@@ -18,6 +20,7 @@ _ENV_NAMES = (
     "OLLAMA_URL",
     "OLLAMA_MODEL",
     "OLLAMA_TIMEOUT_SECONDS",
+    "WELLNESS_TIME",
 )
 
 
@@ -100,3 +103,34 @@ def test_ollama_timeout_must_be_positive(timeout):
 def test_ollama_model_must_not_be_empty():
     with pytest.raises(ValidationError):
         make_settings(ollama_model="")
+
+
+def test_wellness_time_default_is_evening():
+    settings = make_settings()
+
+    assert settings.wellness_time == "21:00"
+    assert settings.wellness_at == time(21, 0)
+
+
+def test_wellness_time_accepts_single_digit_hour_and_normalizes():
+    settings = make_settings(wellness_time="9:05")
+
+    assert settings.wellness_time == "09:05"
+    assert settings.wellness_at == time(9, 5)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["25:00", "21-00", "", "21", "21:60", "вечер"],
+    ids=[
+        "час-вне-диапазона",
+        "чужой-разделитель",
+        "пусто",
+        "без-минут",
+        "минуты-вне-диапазона",
+        "словами",
+    ],
+)
+def test_wellness_time_requires_hh_mm(value):
+    with pytest.raises(ValidationError, match="WELLNESS_TIME"):
+        make_settings(wellness_time=value)

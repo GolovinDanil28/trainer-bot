@@ -11,7 +11,7 @@ from telegram.ext import CommandHandler, MessageHandler
 from src.app import build_application
 from src.bot.handlers import on_free_text
 from src.config import Settings
-from src.scheduler.runner import JOB_ID
+from src.scheduler.runner import JOB_ID, WELLNESS_JOB_ID
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -34,7 +34,7 @@ def test_application_registers_commands(tmp_path):
         for command in handler.commands
     }
 
-    assert commands == {"new", "list", "off", "history"}
+    assert commands == {"new", "list", "off", "history", "wellness", "plan"}
 
 
 def test_application_registers_free_text_once_and_builds_assistant(tmp_path):
@@ -51,6 +51,7 @@ def test_application_registers_free_text_once_and_builds_assistant(tmp_path):
     assert free_text[0].callback is on_free_text
     assert "assistant_service" in application.bot_data
     assert "workout_service" in application.bot_data
+    assert "wellness_service" in application.bot_data
 
 
 async def test_start_hook_registers_running_job_and_stop_hook_cleans_up(tmp_path):
@@ -63,6 +64,13 @@ async def test_start_hook_registers_running_job_and_stop_hook_cleans_up(tmp_path
         scheduler = application.bot_data["scheduler"]
         assert scheduler.running
         assert scheduler.get_job(JOB_ID) is not None
+
+        # У вечернего вопроса свой job: общий `max_instances` заставил бы два
+        # независимых сценария ждать друг друга.
+        wellness_job = scheduler.get_job(WELLNESS_JOB_ID)
+        assert wellness_job is not None
+        assert wellness_job.id != JOB_ID
+        assert wellness_job.max_instances == 1
     finally:
         await application.post_shutdown(application)
 

@@ -11,10 +11,15 @@ from telegram.ext import ContextTypes
 
 from src.bot.access import owner_only
 from src.bot.service import WorkoutService
+from src.bot.wellness_service import WellnessService
 
 
 def _service(context: ContextTypes.DEFAULT_TYPE) -> WorkoutService:
     return context.bot_data["workout_service"]
+
+
+def _wellness(context: ContextTypes.DEFAULT_TYPE) -> WellnessService:
+    return context.bot_data["wellness_service"]
 
 
 @owner_only
@@ -44,6 +49,19 @@ async def cmd_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/history` — последние записи журнала (R-13)."""
     await update.message.reply_text(_service(context).show_history())
+
+
+@owner_only
+async def cmd_wellness(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/wellness <1–5> [заметка]` — оценка самочувствия (R-21)."""
+    text = update.message.text if update.message else ""
+    await update.message.reply_text(_wellness(context).record_command(text or ""))
+
+
+@owner_only
+async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/plan` — план на завтра по сегодняшней оценке (R-25)."""
+    await update.message.reply_text(_wellness(context).show_plan())
 
 
 @owner_only

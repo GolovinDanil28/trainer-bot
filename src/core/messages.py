@@ -9,6 +9,7 @@ from datetime import time
 from zoneinfo import ZoneInfo
 
 from src.core.history import HistoryEntry
+from src.core.plan import DayPlan
 from src.core.reminders import CHECKIN_STATUS_LABELS, CheckinStatus, ReminderMessage
 from src.core.schedule import (
     WEEKDAY_SHORT,
@@ -147,3 +148,78 @@ def format_assistant_unclear() -> str:
         "«покажи расписание», «убери вторую тренировку».\n"
         "Строгие команды: /new, /list, /off."
     )
+
+
+# --- самочувствие и план (R-19…R-26) -------------------------------------
+
+
+def format_wellness_prompt() -> str:
+    """Вечерний вопрос о самочувствии (R-19)."""
+    return "Как самочувствие сегодня? Оцени от 1 до 5."
+
+
+def format_wellness_saved(score: int) -> str:
+    """Подтверждение оценки; план добавляет сервис (R-20, R-21)."""
+    return f"Записал самочувствие: {score}/5."
+
+
+def format_wellness_command_hint() -> str:
+    """`/wellness` без аргумента или с мусором (R-21)."""
+    return (
+        "Нужна оценка от 1 до 5. Пример: /wellness 3\n"
+        "С заметкой: /wellness 2 не выспался"
+    )
+
+
+def format_stale_wellness_button() -> str:
+    """Кнопка от вопроса другого дня (R-20)."""
+    return (
+        "Этот вопрос уже неактуален.\n"
+        "Отметь самочувствие за сегодня командой /wellness, например /wellness 3"
+    )
+
+
+PLAN_WITHOUT_SCORE = (
+    "Плана на завтра нет: самочувствие за сегодня не отмечено.\n"
+    "Поставь оценку: /wellness 3"
+)
+
+
+def format_plan_without_score() -> str:
+    """`/plan` без оценки (R-25)."""
+    return PLAN_WITHOUT_SCORE
+
+
+def format_plan(plan: DayPlan) -> str:
+    """План на завтра (R-23, R-25).
+
+    При отдыхе текст обязан сказать про напоминание: расписание read-only, и
+    человек не должен ждать, что бот молча отменит тренировку (design D7).
+    """
+    if plan.is_rest:
+        return (
+            "Завтра отдых.\n"
+            "Напоминание по расписанию всё равно придёт — отметь «пропустил», "
+            "чтобы день попал в журнал."
+        )
+
+    if not plan.has_workouts:
+        return (
+            "Завтра тренировок нет. Можно отдохнуть или добавить тренировку: "
+            f"{ASSISTANT_EXAMPLE}"
+        )
+
+    header = f"План на завтра (самочувствие {plan.score}/5):"
+    if any(item.duration_min != item.original_duration_min for item in plan.items):
+        header = f"План на завтра (самочувствие {plan.score}/5, облегчённый):"
+
+    lines = [header]
+    for item in plan.items:
+        line = (
+            f"— {WORKOUT_TYPE_LABELS[item.workout_type]}, "
+            f"{format_time(item.time_of_day)}, {item.duration_min} мин"
+        )
+        if item.duration_min != item.original_duration_min:
+            line += f" (обычно {item.original_duration_min})"
+        lines.append(line)
+    return "\n".join(lines)

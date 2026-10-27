@@ -91,3 +91,30 @@ class Checkin(Base):
     # 'done' | 'skipped' — значения CheckinStatus, не CheckinAction.
     status: Mapped[str] = mapped_column(String(10))
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
+class Wellness(Base):
+    """Самочувствие за день: одна строка = один календарный день пользователя.
+
+    Уникальность `day` — это идемпотентность вечернего вопроса (R-19): второй
+    тик не вставит вторую строку, значит второго вопроса тоже не будет.
+
+    `score is None` — отдельное состояние («вопрос задан, ответа нет»), а не
+    отсутствие данных. Поэтому строка живёт дольше одного тика.
+    """
+
+    __tablename__ = "wellness"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Локальная дата 'YYYY-MM-DD', а не момент: «самочувствие за 26-е» — это
+    # день пользователя, и переход на летнее время не должен его менять.
+    day: Mapped[str] = mapped_column(String(10), unique=True)
+    score: Mapped[int | None] = mapped_column(default=None)
+    note: Mapped[str | None] = mapped_column(String(500), default=None)
+    prompted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    answered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))

@@ -6,9 +6,9 @@
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, literal, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -22,7 +22,8 @@ from src.core.reminders import (
     ReminderStatus,
 )
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutType, WorkoutView
-from src.db.models import Checkin, Reminder, Schedule, Workout
+from src.core.wellness import WellnessEntry
+from src.db.models import Checkin, Reminder, Schedule, Wellness, Workout
 
 
 def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
@@ -259,6 +260,112 @@ def active_schedule_rows(session: Session) -> list[tuple[int, int, str]]:
         .order_by(Schedule.workout_id, Schedule.weekday, Schedule.time_of_day)
     ).all()
     return [(row.workout_id, row.weekday, row.time_of_day) for row in rows]
+
+
+def workouts_for_weekday(session: Session, weekday: Weekday) -> list[WorkoutView]:
+    """Активные тренировки, у которых этот день недели есть в расписании.
+
+    Чтение для плана (R-24): `distinct` нужен, потому что теоретически у одной
+    тренировки может быть две строки на один день; в плане она должна быть одна.
+    """
+    workouts = session.scalars(
+        select(Workout)
+        .distinct()
+        .join(Schedule, Schedule.workout_id == Workout.id)
+        .where(
+            Workout.is_active.is_(True),
+            Schedule.is_active.is_(True),
+            Schedule.weekday == int(weekday),
+        )
+        .order_by(Workout.id)
+    ).all()
+    return [to_view(workout) for workout in workouts]
+
+
+def claim_wellness_prompt(session: Session, day: date, now_utc: datetime) -> bool:
+    """Занять день под вечерний вопрос. `True` — если заняли именно мы (R-19).
+
+    Тот же приём, что у `claim_reminder`: проверка «а не отправляли ли» перед
+    вставкой оставила бы окно, в которое второй тик влезает и отправляет второй
+    вопрос. `ON CONFLICT DO NOTHING` закрывает окно базой.
+    """
+    statement = (
+        sqlite_insert(Wellness)
+        .values(day=day.isoformat(), prompted_at=_naive_utc(now_utc))
+        .on_conflict_do_nothing(index_elements=["day"])
+        .returning(Wellness.id)
+    )
+    wellness_id = session.scalar(statement)
+    session.commit()
+    return wellness_id is not None
+
+
+def wellness_for_day(session: Session, day: date) -> WellnessEntry | None:
+    """Самочувствие за день или `None`, если дня в базе нет."""
+    row = session.scalar(select(Wellness).where(Wellness.day == day.isoformat()))
+    return None if row is None else _wellness_entry(row)
+
+
+def release_wellness_prompt(session: Session, day: date) -> bool:
+    """Освободить день, если вопрос не удалось отправить.
+
+    Удаляем только незаполненную строку: оценку, поставленную другим путём,
+    трогать нельзя. Возвращает `True`, если что-то освободили.
+    """
+    result = session.execute(
+        delete(Wellness).where(
+            Wellness.day == day.isoformat(),
+            Wellness.score.is_(None),
+        )
+    )
+    session.commit()
+    return result.rowcount > 0
+
+
+def save_wellness(
+    session: Session,
+    day: date,
+    score: int,
+    note: str | None,
+    now_utc: datetime,
+) -> WellnessEntry:
+    """Записать оценку за день. Существующая оценка заменяется (R-20, R-21).
+
+    `note=None` означает «заметку не меняли», а не «сотри»: команда
+    `/wellness 5` без текста не должна стирать фразу, сказанную утром.
+    Поэтому не «select → insert», а upsert: два одновременных сохранения
+    не должны ронять друг друга `IntegrityError` (та же причина, что у
+    `claim_wellness_prompt`).
+    """
+    moment = _naive_utc(now_utc)
+    statement = (
+        sqlite_insert(Wellness)
+        .values(day=day.isoformat(), score=score, note=note, answered_at=moment)
+        .on_conflict_do_update(
+            index_elements=["day"],
+            set_={
+                "score": score,
+                "answered_at": moment,
+                # NULL в note — «не меняли»: сохраняем прежнюю заметку.
+                "note": func.coalesce(literal(note), Wellness.note),
+            },
+        )
+    )
+    session.execute(statement)
+    session.commit()
+
+    row = session.scalar(select(Wellness).where(Wellness.day == day.isoformat()))
+    if row is None:  # pragma: no cover — вставка выше только что создала строку
+        raise RuntimeError(f"строка самочувствия за {day} не создалась")
+    return _wellness_entry(row)
+
+
+def _wellness_entry(row: Wellness) -> WellnessEntry:
+    return WellnessEntry(
+        day=date.fromisoformat(row.day),
+        score=row.score,
+        note=row.note,
+    )
 
 
 def cleanup_old_reminders(

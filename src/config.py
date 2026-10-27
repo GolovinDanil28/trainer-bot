@@ -5,11 +5,17 @@
 сразу, а не в момент первого напоминания в три часа ночи.
 """
 
+import re
+from datetime import time
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Час — одна или две цифры: «9:00» в конфиге не должно требовать правки,
+# но «21» без минут — уже не время вопроса.
+_HH_MM_RE = re.compile(r"(?P<hour>\d{1,2}):(?P<minute>\d{2})")
 
 
 class Settings(BaseSettings):
@@ -39,6 +45,10 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="qwen2.5:7b", min_length=1)
     ollama_timeout_seconds: float = Field(default=20, gt=0)
 
+    # Время вечернего вопроса о самочувствии в таймзоне пользователя.
+    # Локальное «21:00», а не UTC-момент: вопрос — свойство дня, а не точки.
+    wellness_time: str = "21:00"
+
     @field_validator("tz")
     @classmethod
     def _known_timezone(cls, value: str) -> str:
@@ -61,7 +71,32 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("wellness_time")
+    @classmethod
+    def _wellness_time_is_hh_mm(cls, value: str) -> str:
+        match = _HH_MM_RE.fullmatch(value.strip())
+        if match is None:
+            raise ValueError(
+                f"WELLNESS_TIME должен быть в формате ЧЧ:ММ, получено '{value}'. "
+                "Пример: 21:00"
+            )
+
+        hour, minute = int(match["hour"]), int(match["minute"])
+        if hour > 23 or minute > 59:
+            raise ValueError(
+                f"WELLNESS_TIME вне диапазона 00:00–23:59, получено '{value}'. "
+                "Пример: 21:00"
+            )
+
+        # Нормализуем к двум цифрам: «9:30» и «09:30» — одно и то же время.
+        return f"{hour:02d}:{minute:02d}"
+
     @property
     def zone(self) -> ZoneInfo:
         """Таймзона для форматирования и вычисления моментов."""
         return ZoneInfo(self.tz)
+
+    @property
+    def wellness_at(self) -> time:
+        """Время вечернего вопроса как `time`: формат уже проверен валидатором."""
+        return time.fromisoformat(self.wellness_time)
