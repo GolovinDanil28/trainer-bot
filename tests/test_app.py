@@ -11,6 +11,7 @@ from telegram.ext import CommandHandler, MessageHandler
 from src.app import build_application
 from src.bot.handlers import on_free_text
 from src.config import Settings
+from src.core.help import COMMANDS
 from src.scheduler.runner import JOB_ID, WELLNESS_JOB_ID
 
 
@@ -34,7 +35,43 @@ def test_application_registers_commands(tmp_path):
         for command in handler.commands
     }
 
-    assert commands == {"new", "list", "off", "history", "wellness", "plan"}
+    assert commands == {
+        "start",
+        "help",
+        "new",
+        "list",
+        "off",
+        "history",
+        "wellness",
+        "plan",
+    }
+
+
+def test_help_lists_exactly_the_registered_commands(tmp_path):
+    # Гарантия «справка не отстаёт от команд»: один источник — COMMANDS,
+    # а регистрация в приложении обязана с ним совпадать.
+    application = build_application(make_settings(tmp_path))
+
+    registered = {
+        command
+        for group in application.handlers.values()
+        for handler in group
+        if isinstance(handler, CommandHandler)
+        for command in handler.commands
+    }
+    documented = {entry.command.lstrip("/") for entry in COMMANDS}
+
+    assert registered == documented
+
+    # Команду можно спрятать в MessageHandler по регулярке — тогда проверка выше
+    # её не увидит. Единственный MessageHandler обязан быть свободным текстом.
+    message_handlers = [
+        handler
+        for group in application.handlers.values()
+        for handler in group
+        if isinstance(handler, MessageHandler)
+    ]
+    assert [handler.callback for handler in message_handlers] == [on_free_text]
 
 
 def test_application_registers_free_text_once_and_builds_assistant(tmp_path):

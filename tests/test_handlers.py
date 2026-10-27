@@ -10,7 +10,17 @@ from sqlalchemy import func, select
 
 from src.bot.access import OWNER_KEY, REFUSAL_TEXT
 from src.bot.assistant_service import AssistantService
-from src.bot.handlers import cmd_history, cmd_list, cmd_new, cmd_off, on_free_text
+from src.bot.handlers import (
+    cmd_help,
+    cmd_history,
+    cmd_list,
+    cmd_new,
+    cmd_off,
+    cmd_start,
+    on_free_text,
+)
+from src.core.messages import format_help
+from src.db.base import Base
 from src.db.models import Workout
 from tests.fakes import FakeBot, FakeLLM, make_context, make_update
 
@@ -75,9 +85,28 @@ async def test_cmd_history_replies_with_journal(service):
     assert update.message.sent == [service.show_history()]
 
 
+async def test_cmd_help_replies_with_card(service):
+    update = make_update("/help")
+
+    await cmd_help(update, service_context(service))
+
+    assert update.message.sent == [format_help()]
+
+
+async def test_cmd_start_greets_and_shows_card(service):
+    update = make_update("/start")
+
+    await cmd_start(update, service_context(service))
+
+    assert update.message.sent[0].startswith("Привет!")
+    assert format_help() in update.message.sent[0]
+
+
 # Все команды — через один декоратор, поэтому отказ должен быть буквально
 # одинаковым. Параметризация ловит случай, когда новую команду забыли закрыть.
-COMMANDS = [
+OWNER_COMMANDS = [
+    pytest.param(cmd_start, "/start", id="start"),
+    pytest.param(cmd_help, "/help", id="help"),
     pytest.param(cmd_new, "/new strength Пн 19:30", id="new"),
     pytest.param(cmd_list, "/list", id="list"),
     pytest.param(cmd_off, "/off 1", id="off"),
@@ -85,7 +114,7 @@ COMMANDS = [
 ]
 
 
-@pytest.mark.parametrize(("handler", "text"), COMMANDS)
+@pytest.mark.parametrize(("handler", "text"), OWNER_COMMANDS)
 async def test_stranger_gets_same_neutral_refusal(
     service, session_factory, handler, text
 ):
@@ -124,18 +153,27 @@ async def test_free_text_owner_gets_answer_and_typing_first(service):
     assert bot.actions == [(update.message.chat_id, "typing")]
 
 
-async def test_free_text_stranger_does_not_call_model(service, session_factory):
-    llm = FakeLLM(answers={"покажи расписание": '{"action":"list"}'})
-    update = make_update("покажи расписание", user_id=999)
+@pytest.mark.parametrize(
+    "phrase",
+    ["покажи расписание", "помоги", "HELP!"],
+    ids=["фраза-ассистента", "просьба-о-справке", "капсом"],
+)
+async def test_free_text_stranger_does_not_call_model(
+    service, session_factory, phrase
+):
+    llm = FakeLLM(answers={phrase: '{"action":"list"}'})
+    update = make_update(phrase, user_id=999)
     bot = FakeBot()
+    before = db_snapshot(session_factory)
 
     await on_free_text(update, free_text_context(service, llm, bot))
 
     assert update.message.sent == [REFUSAL_TEXT]
+    # Справка не должна утечь постороннему ни по какому пути (R-31).
+    assert "Что я умею" not in update.message.sent[0]
     assert llm.calls == []
     assert bot.actions == []
-    with session_factory() as session:
-        assert session.scalar(select(func.count()).select_from(Workout)) == 0
+    assert db_snapshot(session_factory) == before
 
 
 async def test_free_text_ignores_commands(service):
@@ -148,3 +186,51 @@ async def test_free_text_ignores_commands(service):
     assert update.message.sent == []
     assert llm.calls == []
     assert bot.actions == []
+
+
+def db_snapshot(session_factory) -> tuple[int, ...]:
+    """Счётчики всех таблиц: справка не должна писать никуда (R-30).
+
+    Таблицы берутся из метадаты, а не перечисляются руками: новая таблица должна
+    попадать в проверку сама, иначе «ничего не изменилось» тихо сузится.
+    """
+    with session_factory() as session:
+        return tuple(
+            session.scalar(select(func.count()).select_from(table))
+            for table in Base.metadata.sorted_tables
+        )
+
+
+async def test_free_text_help_does_not_call_model(service, session_factory):
+    llm = FakeLLM()
+    bot = FakeBot()
+    update = make_update("помоги")
+    before = db_snapshot(session_factory)
+
+    await on_free_text(update, free_text_context(service, llm, bot))
+
+    assert update.message.sent == [format_help()]
+    assert llm.calls == []
+    # Справка — мгновенный ответ, «печатает…» здесь только шумит.
+    assert bot.actions == []
+    assert db_snapshot(session_factory) == before
+
+
+async def test_free_text_help_works_without_model(service):
+    llm = FakeLLM(mode="unreachable")
+    update = make_update("help")
+
+    await on_free_text(update, free_text_context(service, llm, FakeBot()))
+
+    assert update.message.sent == [format_help()]
+    assert llm.calls == []
+
+
+async def test_free_text_help_like_phrase_goes_to_model(service):
+    phrase = "помоги составить тренировку на среду"
+    llm = FakeLLM()
+    update = make_update(phrase)
+
+    await on_free_text(update, free_text_context(service, llm, FakeBot()))
+
+    assert [text for text, _ in llm.calls] == [phrase]

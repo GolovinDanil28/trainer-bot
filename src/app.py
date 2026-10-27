@@ -21,11 +21,13 @@ from src.bot.access import OWNER_KEY
 from src.bot.assistant_service import AssistantService
 from src.bot.callbacks import on_checkin, on_wellness
 from src.bot.handlers import (
+    cmd_help,
     cmd_history,
     cmd_list,
     cmd_new,
     cmd_off,
     cmd_plan,
+    cmd_start,
     cmd_wellness,
     on_free_text,
 )
@@ -93,6 +95,8 @@ def build_wellness_tick(
 
 def register_handlers(application: Application) -> None:
     """Команды бота и кнопки под сообщениями."""
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("new", cmd_new))
     application.add_handler(CommandHandler("list", cmd_list))
     application.add_handler(CommandHandler("off", cmd_off))
