@@ -175,8 +175,7 @@ HELP_LIMITS = (
     "— разовые переносы («завтра не смогу»);\n"
     "— тренировку на конкретную дату, только недельное расписание;\n"
     "— несколько действий в одной фразе;\n"
-    "— недельный разбор и план на следующую неделю;\n"
-    "— свободный текст без Ollama."
+    "— недельный разбор и план на следующую неделю."
 )
 
 
@@ -192,7 +191,10 @@ def format_help() -> str:
     lines.extend(["", "Команды:"])
     for entry in COMMANDS:
         lines.append(f"{entry.command} — {entry.purpose}")
-        lines.append(f"  {entry.example}")
+        # Пример печатаем только когда он добавляет информацию: у шести команд
+        # из восьми example совпадает с командой, и вторая строка — шум.
+        if entry.example != entry.command:
+            lines.append(f"  {entry.example}")
 
     lines.extend(["", "Можно фразой:"])
     for phrase, meaning in FREE_TEXT_EXAMPLES:

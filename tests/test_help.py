@@ -120,7 +120,12 @@ def test_help_card_has_all_sections_and_commands():
 
     for entry in COMMANDS:
         assert f"{entry.command} — {entry.purpose}" in text
-        assert entry.example in text
+        if entry.example != entry.command:
+            # Пример обязан быть в карточке, только если он содержательный.
+            assert f"  {entry.example}" in text
+        else:
+            # Дублирующий пример (example == command) не печатается (R-28).
+            assert f"  {entry.command}" not in text
 
     for phrase, meaning in FREE_TEXT_EXAMPLES:
         assert f"«{phrase}» → {meaning}" in text
@@ -131,8 +136,11 @@ def test_help_card_is_honest_about_limits():
 
     assert "Чего не умею" in text
     # Ограничения — это обещание: если убрать строку, карточка начнёт врать.
-    for limit in ("дату", "несколько действий", "недельный разбор", "Ollama"):
+    for limit in ("дату", "несколько действий", "недельный разбор"):
         assert limit in text, limit
+    # Про Ollama в карточке строки нет: подсказка «модель не запущена» приходит
+    # в момент, когда владелец пишет свободный текст, — там она уместнее.
+    assert "Ollama" not in text
 
 
 def test_help_card_can_be_asked_by_phrase():
