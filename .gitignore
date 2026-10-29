@@ -31,3 +31,7 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# SQLite WAL/SHM рядом с *.db
+*.db-shm
+*.db-wal
