@@ -13,7 +13,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.reminders import ReminderSender
 from src.core.schedule import Weekday
-from src.core.timeplan import DEFAULT_TICK_WINDOW, moment_in_window, waiting_cutoff
+from src.core.timeplan import (
+    DEFAULT_TICK_WINDOW,
+    moment_for_date_in_window,
+    moment_in_window,
+    waiting_cutoff,
+)
 from src.db import repository
 from src.scheduler.delivery import DeliveryReport, ReminderDelivery
 
@@ -55,6 +60,7 @@ class SchedulerTick:
         """Моменты, попавшие в окно тика, вместе с id тренировок."""
         with self._session_factory() as session:
             rows = repository.active_schedule_rows(session)
+            once_rows = repository.active_once_rows(session)
 
         moments: list[tuple[int, datetime]] = []
         for workout_id, weekday, raw_time in rows:
@@ -62,6 +68,18 @@ class SchedulerTick:
                 now_utc,
                 self._zone,
                 Weekday(weekday),
+                time.fromisoformat(raw_time),
+                self._window,
+            )
+            if moment is not None:
+                moments.append((workout_id, moment))
+
+        # Разовая тренировка напоминает один раз — в свою дату (R-35).
+        for workout_id, day, raw_time in once_rows:
+            moment = moment_for_date_in_window(
+                now_utc,
+                self._zone,
+                day,
                 time.fromisoformat(raw_time),
                 self._window,
             )

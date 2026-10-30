@@ -33,13 +33,14 @@ def make_view(
     [
         (45, 30),
         (60, 40),
+        (70, 45),
         (20, 10),
         (10, 5),
         (5, 5),
         (90, 60),
         (30, 20),
     ],
-    ids=["45", "60", "20", "10-минимум", "5-минимум", "90", "30"],
+    ids=["45", "60", "70", "20", "10-минимум", "5-минимум", "90", "30"],
 )
 def test_reduced_duration_rounds_down_to_five(duration_min, expected):
     assert reduced_duration(duration_min) == expected

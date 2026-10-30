@@ -26,7 +26,7 @@ def test_create_workout_writes_header_and_schedule(engine, session_factory, draf
         view = repository.create_workout(session, draft)
 
         assert view.id == 1
-        assert view.workout_type is WorkoutType.STRENGTH
+        assert view.workout_type == WorkoutType.STRENGTH
         assert view.weekdays == draft.weekdays
         assert view.time_of_day == time(19, 30)
 

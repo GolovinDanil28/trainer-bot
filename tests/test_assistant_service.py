@@ -101,6 +101,9 @@ async def test_none_does_not_touch_write_methods(service):
         raise AssertionError("none не должен вызывать запись")
 
     service.create_from_command = boom  # type: ignore[method-assign]
+    service.create_weekly = boom  # type: ignore[method-assign]
+    service.create_once = boom  # type: ignore[method-assign]
+    service.show_schedule = boom  # type: ignore[method-assign]
     service.disable = boom  # type: ignore[method-assign]
 
     answer = await make_assistant(FakeLLM(), service).handle("я устал")

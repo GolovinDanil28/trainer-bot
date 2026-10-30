@@ -5,13 +5,15 @@
 проверяется в `service.py` и `core/».
 """
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
 from src.bot.access import owner_only
+from src.bot.pending import PendingChoices
 from src.bot.service import WorkoutService
 from src.bot.wellness_service import WellnessService
+from src.core.choice import build_type_choice_callback
 from src.core.help import is_help_request
 from src.core.messages import format_help, format_start
 
@@ -100,4 +102,24 @@ async def on_free_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # работает, а не завис (R-17).
     await context.bot.send_chat_action(chat_id=message.chat_id, action=ChatAction.TYPING)
     assistant = context.bot_data["assistant_service"]
-    await message.reply_text(await assistant.handle(text))
+    turn = await assistant.handle_turn(text)
+    if turn.intent is None or not turn.intent.type_options:
+        await message.reply_text(turn.text)
+        return
+
+    # «или» во фразе: тип выбирает владелец кнопкой, а намерение ждёт в памяти
+    # bot-слоя (R-34). В БД до выбора ничего не пишется.
+    pending: PendingChoices = context.bot_data["pending_choices"]
+    choice = pending.put(message.chat_id, turn.intent)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    option,
+                    callback_data=build_type_choice_callback(choice.id, index),
+                )
+            ]
+            for index, option in enumerate(turn.intent.type_options)
+        ]
+    )
+    await message.reply_text(turn.text, reply_markup=keyboard)

@@ -5,6 +5,7 @@ from datetime import time
 import pytest
 
 from src.core.schedule import (
+    UNKNOWN_TYPE_DURATION_MIN,
     CommandError,
     Weekday,
     WorkoutType,
@@ -15,7 +16,7 @@ from src.core.schedule import (
 def test_valid_command():
     draft = parse_new_command("/new strength Пн,Ср,Пт 19:30")
 
-    assert draft.workout_type is WorkoutType.STRENGTH
+    assert draft.workout_type == WorkoutType.STRENGTH
     assert draft.weekdays == (Weekday.MONDAY, Weekday.WEDNESDAY, Weekday.FRIDAY)
     assert draft.time_of_day == time(19, 30)
     assert draft.duration_min == 45
@@ -24,7 +25,7 @@ def test_valid_command():
 def test_command_is_case_insensitive_and_allows_single_digit_hour():
     draft = parse_new_command("/new CARDIO пн,пт 7:05")
 
-    assert draft.workout_type is WorkoutType.CARDIO
+    assert draft.workout_type == WorkoutType.CARDIO
     assert draft.weekdays == (Weekday.MONDAY, Weekday.FRIDAY)
     assert draft.time_of_day == time(7, 5)
     assert draft.duration_min == 30
@@ -33,7 +34,7 @@ def test_command_is_case_insensitive_and_allows_single_digit_hour():
 def test_bot_mention_in_command_is_ignored():
     draft = parse_new_command("/new@TrainerBot mobility сб 10:00")
 
-    assert draft.workout_type is WorkoutType.MOBILITY
+    assert draft.workout_type == WorkoutType.MOBILITY
     assert draft.weekdays == (Weekday.SATURDAY,)
 
 
@@ -70,11 +71,17 @@ def test_empty_day_in_list_is_rejected():
         parse_new_command("/new strength Пн,,Ср 19:30")
 
 
-def test_unknown_type_is_rejected_with_allowed_list():
-    with pytest.raises(CommandError, match="Неизвестный тип") as exc:
-        parse_new_command("/new yoga Пн 19:30")
+def test_free_type_is_accepted_with_default_duration():
+    # R-33: тип — свободная фраза, а не слово из списка.
+    draft = parse_new_command("/new бег Пн 19:30")
 
-    assert "strength" in str(exc.value)
+    assert draft.workout_type == "бег"
+    assert draft.duration_min == UNKNOWN_TYPE_DURATION_MIN
+
+
+def test_too_long_type_is_rejected():
+    with pytest.raises(CommandError, match="Слишком длинный тип"):
+        parse_new_command("/new " + "бег" * 20 + " Пн 19:30")
 
 
 def test_wrong_argument_count_is_rejected():

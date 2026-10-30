@@ -18,17 +18,19 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from src.core.schedule import WEEKDAY_ALIASES, Weekday, WorkoutType
+from src.core.schedule import (
+    DATE_RAW_MAX_LENGTH,
+    WEEKDAY_ALIASES,
+    CommandError,
+    Weekday,
+    normalize_workout_type,
+)
 
 # Проверка «опоры на текст»: модель не имеет права добавлять поля, которых
 # в фразе нет. Это дешевле и надёжнее, чем надеяться на 7B-модель (R-15).
-_TYPE_WORDS: dict[WorkoutType, re.Pattern[str]] = {
-    WorkoutType.STRENGTH: re.compile(r"\b(силов\w*|strength)\b", re.IGNORECASE),
-    WorkoutType.CARDIO: re.compile(r"\b(кардио|cardio)\b", re.IGNORECASE),
-    WorkoutType.MOBILITY: re.compile(
-        r"\b(мобильн\w*|растяжк\w*|mobility)\b", re.IGNORECASE
-    ),
-}
+# Тип теперь свободный (R-33), поэтому проверяем не словарь, а слова самого
+# типа в тексте.
+_WORD = re.compile(r"[\w-]+", re.UNICODE)
 _WEEKDAY_WORD = re.compile(
     r"\b(пн|вт|ср|чт|пт|сб|вс|понед\w*|вторн\w*|сред\w*|четвер\w*|"
     r"пятн\w*|суббот\w*|воскрес\w*)\b",
@@ -67,9 +69,13 @@ class AssistantAction(StrEnum):
 @dataclass
 class AssistantIntent:
     action: AssistantAction
-    type: WorkoutType | None = None
+    type: str | None = None
     days: list[Weekday] | None = None
     time: str | None = None  # "ЧЧ:ММ"
+    distance_km: float | None = None
+    duration_min: int | None = None
+    type_options: tuple[str, ...] = ()
+    date_raw: str | None = None
     workout_id: int | None = None
     reason: str = ""
 
@@ -147,9 +153,20 @@ def _ensure_grounded(intent: AssistantIntent, text: str) -> None:
     запись, которую пользователь не просил.
     """
     if intent.action is AssistantAction.CREATE:
-        if intent.type is None or not _TYPE_WORDS[intent.type].search(text):
+        if intent.type is None and not intent.type_options:
             raise IntentError("В тексте не назван тип тренировки")
-        if not _WEEKDAY_WORD.search(text) and not _EVERY_DAY.search(text):
+        if intent.type is not None and not _words_present(intent.type, text):
+            raise IntentError("В тексте не назван тип тренировки")
+        if intent.type_options and not any(
+            _words_present(option, text) for option in intent.type_options
+        ):
+            raise IntentError("В тексте не назван ни один из вариантов типа")
+        if intent.date_raw is not None:
+            # Дата — не слово: «28.10» не попадёт в токены из-за точки, поэтому
+            # проверяем вхождение в нормализованный текст, а не в множество слов.
+            if intent.date_raw not in _flat(text):
+                raise IntentError("В тексте не названа дата")
+        elif not _WEEKDAY_WORD.search(text) and not _EVERY_DAY.search(text):
             raise IntentError("В тексте не названы дни недели")
         if not _TIME_WORD.search(text):
             raise IntentError("В тексте нет точного времени")
@@ -198,31 +215,48 @@ def parse_intent(raw_json: str, text: str | None = None) -> AssistantIntent:
     ar_workout_id = data.get("workout_id")
     ar_reason = data.get("reason", "")
 
-    # Приведение типа workout_type, если указано
-    wtype: WorkoutType | None = None
+    # Тип — свободная фраза (R-33); форму проверяет тот же код, что у `/new`.
+    wtype: str | None = None
     if ar_type is not None:
+        if not isinstance(ar_type, str):
+            raise IntentError("Поле «type» должно быть строкой")
         try:
-            wtype = WorkoutType(ar_type.strip().lower())
-        except ValueError:
-            allowed = ", ".join(item.value for item in WorkoutType)
-            raise IntentError(
-                f"Неизвестный тип тренировки «{ar_type}». Допустимые: {allowed}."
-            ) from None
+            wtype = normalize_workout_type(ar_type)
+        except CommandError as exc:
+            raise IntentError(str(exc)) from None
+
+    # Дата разовой тренировки (R-35): только токен из текста, не вычисление.
+    date_raw = _parse_date_raw(data.get("date_raw"))
+
+    # Варианты «или» (R-34): 2–4 названия, каждое проходит те же границы, что
+    # одиночный тип.
+    options = _parse_type_options(data.get("type_options"))
+
+    # Дистанция и явная длительность (R-32): только числа в разумных границах.
+    distance_km = _parse_distance(data.get("distance_km"))
+    explicit_minutes = _parse_duration(data.get("duration_min"))
 
     # Валидация зависит от действия
     if action == AssistantAction.CREATE:
-        if wtype is None:
+        if wtype is None and not options:
             raise IntentError(
-                "Для действия create обязательно поле type (strength/cardio/mobility)."
+                "Для действия create обязательно поле type — название вида спорта."
             )
-        if ar_days is None:
-            # «Каждый день» + точное время — это все семь дней; без явных дней
-            # и без этой фразы create неполон (R-14, сценарий из корпуса).
-            if text is not None and _EVERY_DAY.search(text):
-                ar_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-            else:
-                raise IntentError("Для действия create обязательно поле days.")
-        days = _validate_days(ar_days)
+        if date_raw is not None:
+            # Разовая тренировка: дата вместо дней. Оба сразу — противоречие,
+            # а не повод выбрать одно за владельца (R-35).
+            if ar_days:
+                raise IntentError("Нельзя одновременно назвать дни недели и дату.")
+            days: list[Weekday] | None = None
+        else:
+            if ar_days is None:
+                # «Каждый день» + точное время — это все семь дней; без явных дней
+                # и без этой фразы create неполон (R-14, сценарий из корпуса).
+                if text is not None and _EVERY_DAY.search(text):
+                    ar_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+                else:
+                    raise IntentError("Для действия create обязательны дни недели или дата.")
+            days = _validate_days(ar_days)
         if ar_time is None:
             raise IntentError("Для действия create обязательно поле time.")
         time = _parse_time(ar_time)
@@ -262,6 +296,10 @@ def parse_intent(raw_json: str, text: str | None = None) -> AssistantIntent:
         days=days,
         time=time,
         workout_id=workout_id,
+        distance_km=distance_km,
+        duration_min=explicit_minutes,
+        type_options=options,
+        date_raw=date_raw,
         reason=str(ar_reason) if ar_reason is not None else "",
     )
     if text is not None:
@@ -274,8 +312,19 @@ _SYSTEM_PROMPT = """Ты переводишь фразу владельца пр
 
 Поля:
 - action: "create" | "list" | "off" | "none"
-- type: "strength" | "cardio" | "mobility" (мобильность, растяжка) | null
+- type: короткое название тренировки из текста (1–3 слова: "бег",
+  "интервальный бег", "силовая", "кардио", "растяжка") или null
+- type_options: массив из 2–4 названий или null. Заполняй, только если
+  владелец перечислил варианты через «или»: тогда type = null, а варианты
+  идут сюда по порядку
+- distance_km: дистанция числом в километрах ("7 км" → 7) или null,
+  если расстояния в тексте нет
+- duration_min: длительность целым числом минут ("на 40 минут" → 40) или
+  null, если длительность в тексте не названа
 - days: массив дней из ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"] или null
+- date_raw: если в тексте названа дата вместо дней недели — верни её как
+  в тексте: "сегодня", "завтра" или "ДД.ММ" / "ДД.ММ.ГГГГ"; иначе null.
+  Не вычисляй дату в уме: просто скопируй токен
 - time: "ЧЧ:ММ" в 24-часовом формате или null
 - workout_id: целое число или null
 - reason: короткое объяснение по-русски
@@ -287,8 +336,15 @@ _SYSTEM_PROMPT = """Ты переводишь фразу владельца пр
   «вторая тренировка» — это строка с номером 2 в списке, а не второй день.
 - none — всё остальное.
 
+Дата и дни недели взаимно исключают друг друга: если есть date_raw,
+days = null (тренировка разовая); если есть days, date_raw = null.
+
+Если вариантов несколько («или»), заполни type_options, а не выбирай сам:
+владелец выберет кнопкой. Дни и время при этом всё равно обязательны.
+
 Проверка перед create, все четыре пункта обязательны:
-1. Тип назван словом из списка? Нет — none.
+1. Тип назван в тексте словами владельца: любое название вида тренировки
+   подходит, придумывать тип нельзя. Нет — none.
 2. Дни недели названы? Нет — none.
 3. Время точное, с часами и минутами? Нет — none.
 4. Тип, дни и время взяты из текста, а не из расписания и не «по смыслу»?
@@ -308,6 +364,10 @@ _SYSTEM_PROMPT = """Ты переводишь фразу владельца пр
 - «каждый день» или «ежедневно» вместе с точным временем — все семь дней;
 - слово «утром» или «вечером» рядом с точным временем не мешает create.
 
+Пример: «бег по средам в 19:00» → action "create", type "бег",
+days ["Ср"], time "19:00"; «интервальный бег 7 км по пятницам в 8 утра» →
+type "интервальный бег", distance_km 7, days ["Пт"], time "08:00".
+
 При сомнении всегда возвращай none. Ложное действие хуже отказа."""
 
 EMPTY_SCHEDULE_HINT = "Расписание пусто."
@@ -322,3 +382,140 @@ def build_user_prompt(text: str, schedule_hint: str) -> str:
     """User-промпт: текст сообщения и read-only снапшот расписания (D4)."""
     snapshot = schedule_hint.strip() or EMPTY_SCHEDULE_HINT
     return f"Текущее расписание:\n{snapshot}\n\nСообщение владельца:\n{text.strip()}"
+
+
+_MAX_DISTANCE_KM = 100.0
+_MAX_DURATION_MIN = 600
+
+
+_MIN_TYPE_OPTIONS = 2
+_MAX_TYPE_OPTIONS = 4
+
+
+_DATE_RAW = re.compile(
+    r"^(?:сегодня|завтра|послезавтра|\d{1,2}\.\d{1,2}(?:\.\d{4})?)$"
+)
+
+
+def _parse_date_raw(raw: object) -> str | None:
+    """Дата из ответа модели (R-35): токен, а не вычисленная дата (D2)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise IntentError(f"Поле «date_raw» должно быть строкой, получено {raw!r}")
+    value = " ".join(raw.split()).lower()
+    if len(value) > DATE_RAW_MAX_LENGTH or not _DATE_RAW.fullmatch(value):
+        raise IntentError(
+            f"Дата «{raw}» не распознана: нужна «завтра» или «ДД.ММ». "
+            "Точка расчёта даты — в боте, не в модели."
+        )
+    return value
+
+
+def _parse_type_options(raw: object) -> tuple[str, ...]:
+    """Разобрать варианты «или» (R-34): 2–4 разных названия в тех же границах."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise IntentError("Поле «type_options» должно быть массивом строк")
+    if not _MIN_TYPE_OPTIONS <= len(raw) <= _MAX_TYPE_OPTIONS:
+        raise IntentError(
+            f"Вариантов типа должно быть "
+            f"{_MIN_TYPE_OPTIONS}–{_MAX_TYPE_OPTIONS}, получено {len(raw)}"
+        )
+    options: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise IntentError("Каждый вариант типа должен быть строкой")
+        try:
+            options.append(normalize_workout_type(item))
+        except CommandError as exc:
+            raise IntentError(str(exc)) from None
+    if len({option.lower() for option in options}) != len(options):
+        raise IntentError("Варианты типа не должны повторяться")
+    return tuple(options)
+
+
+def _parse_distance(raw: object) -> float | None:
+    """Дистанция из ответа модели (R-32): число в диапазоне (0; 100]."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        raise IntentError(f"Поле «distance_km» должно быть числом, получено {raw!r}")
+    value = float(raw)
+    if not (0 < value <= _MAX_DISTANCE_KM):
+        raise IntentError(
+            f"Дистанция должна быть в диапазоне 0–{_MAX_DISTANCE_KM:g} км, получено {value:g}"
+        )
+    return value
+
+
+def _parse_duration(raw: object) -> int | None:
+    """Явная длительность из ответа модели (R-32): целые минуты 5–600."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise IntentError(f"Поле «duration_min» должно быть целым числом, получено {raw!r}")
+    if not (5 <= raw <= _MAX_DURATION_MIN):
+        raise IntentError(
+            f"Длительность должна быть 5–{_MAX_DURATION_MIN} минут, получено {raw}"
+        )
+    return raw
+
+
+def _flat(text: str) -> str:
+    """Текст в нижнем регистре, ё→е, пробелы схлопнуты: база для дат и чисел."""
+    return " ".join(text.lower().replace("ё", "е").split())
+
+
+def _normalize_words(text: str) -> set[str]:
+    """Слова текста в нижнем регистре, ё→е: база для проверки опоры (R-15)."""
+    return {word.replace("ё", "е").lower() for word in _WORD.findall(text)}
+
+
+# Семейства синонимов: модель может вернуть «растяжку», когда во фразе была
+# «мобильность», или английское слово из старого корпуса. Проверка опоры тогда
+# смотрит на всё семейство, а не на одно слово.
+_TYPE_FAMILIES: dict[str, re.Pattern[str]] = {
+    "strength": re.compile(r"\b(силов\w*|strength)\b", re.IGNORECASE),
+    "cardio": re.compile(r"\b(кардио|cardio|бег\w*)\b", re.IGNORECASE),
+    "mobility": re.compile(r"\b(мобильн\w*|растяж\w*|mobility)\b", re.IGNORECASE),
+}
+_FAMILY_BY_WORD: dict[str, str] = {
+    "силов": "strength",
+    "strength": "strength",
+    "кардио": "cardio",
+    "cardio": "cardio",
+    "бег": "cardio",
+    "мобиль": "mobility",
+    "растяж": "mobility",
+    "mobility": "mobility",
+}
+
+
+def _family(value: str) -> re.Pattern[str] | None:
+    """Семейство синонимов для типа, если тип из него узнаётся."""
+    low = value.lower()
+    for stem, family in _FAMILY_BY_WORD.items():
+        if low.startswith(stem):
+            return _TYPE_FAMILIES[family]
+    return None
+
+
+def _words_present(value: str, text: str) -> bool:
+    """Значение опирается на текст: правило R-15 для свободного типа (R-33)."""
+    family = _family(value)
+    if family is not None:
+        return bool(family.search(text))
+
+    words = [word for word in _normalize_words(value) if len(word) >= 3]
+    if not words:
+        # Тип из коротких слов: нечего проверять — не мешаем владельцу.
+        return True
+    present = _normalize_words(text)
+    # Корень, а не полное слово: «силовая» во фразе звучит «силовую».
+    return any(
+        token.startswith(word[: min(4, len(word))])
+        for word in words
+        for token in present
+    )

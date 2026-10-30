@@ -69,6 +69,24 @@ def moment_in_window(
     return None
 
 
+def moment_for_date_in_window(
+    now_utc: datetime,
+    zone: ZoneInfo,
+    day,
+    at: time,
+    window: timedelta = DEFAULT_TICK_WINDOW,
+) -> datetime | None:
+    """Момент разовой тренировки, попавший в окно тика (R-35).
+
+    Отличается от недельного: дата названа один раз, и «следующей недели» у неё
+    нет. Поэтому сравнение абсолютное, а не через `next_occurrence`.
+    """
+    candidate = _local_moment(day, at, zone).astimezone(UTC)
+    if now_utc - window <= candidate < now_utc + window:
+        return candidate
+    return None
+
+
 def waiting_cutoff(
     now_utc: datetime,
     zone: ZoneInfo,

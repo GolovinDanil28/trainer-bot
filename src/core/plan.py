@@ -9,7 +9,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import time
 
-from src.core.schedule import WorkoutType, WorkoutView
+from src.core.schedule import (
+    DURATION_STEP_MIN,
+    MIN_DURATION_MIN,
+    WorkoutView,
+)
 from src.core.wellness import WellnessScore
 
 # Оценка 1–2 — отдых: при плохом самочувствии тренировка не «чуть меньше», а
@@ -18,11 +22,6 @@ REST_MAX_SCORE = 2
 # Оценка 3 — самый частый случай: тренировка остаётся, но легче.
 LIGHT_SCORE = 3
 REDUCTION_PERCENT = 30
-
-# Шаг округления вниз. Пять минут — потому что «32 минуты» в плане читаются как
-# ошибка, а не как правило. Нижняя граница — 5: облегчение не должно обнулять.
-DURATION_STEP_MIN = 5
-MIN_DURATION_MIN = 5
 
 _ONE_HUNDRED_PERCENT = 100
 
@@ -37,7 +36,7 @@ class PlanItem:
     иначе две тренировки одного типа в разные часы выглядели бы одинаково.
     """
 
-    workout_type: WorkoutType
+    workout_type: str
     time_of_day: time
     duration_min: int
     original_duration_min: int

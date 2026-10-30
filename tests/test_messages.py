@@ -7,7 +7,6 @@ from src.core.messages import (
     EMPTY_LIST_HINT,
     format_created,
     format_disabled,
-    format_draft_created,
     format_reminder,
     format_schedule,
     format_time,
@@ -15,7 +14,7 @@ from src.core.messages import (
     format_weekdays,
 )
 from src.core.reminders import ReminderMessage
-from src.core.schedule import Weekday, WorkoutDraft, WorkoutType, WorkoutView
+from src.core.schedule import Weekday, WorkoutType, WorkoutView
 
 STRENGTH = WorkoutView(
     id=1,
@@ -41,19 +40,6 @@ def test_weekdays_and_time_formatting():
 
 def test_created_message():
     assert format_created(STRENGTH) == "Готово: #1 — силовая, Пн, Ср, Пт, 19:30 (45 мин)."
-
-
-def test_created_message_from_draft():
-    draft = WorkoutDraft(
-        workout_type=WorkoutType.MOBILITY,
-        weekdays=(Weekday.SUNDAY,),
-        time_of_day=time(10, 0),
-        duration_min=20,
-    )
-
-    assert format_draft_created(7, draft) == (
-        "Готово: #7 — мобильность, Вс, 10:00 (20 мин)."
-    )
 
 
 def test_schedule_with_two_workouts():

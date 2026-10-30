@@ -127,7 +127,7 @@ async def test_create_phrases(service, phrase, answer, workout_type, days, momen
 
     assert len(workouts) == 1
     workout = workouts[0]
-    assert workout.workout_type is workout_type
+    assert workout.workout_type == workout_type
     assert list(workout.weekdays) == days
     assert workout.time_of_day.strftime("%H:%M") == moment
 

@@ -109,7 +109,10 @@ def test_free_text_examples_point_to_real_commands():
     known = {entry.command for entry in COMMANDS}
 
     for _, meaning in FREE_TEXT_EXAMPLES:
-        assert meaning.split()[0] in known
+        # У примера с датой команды нет — это новая возможность свободного
+        # текста; у остальных примеров команда обязана существовать.
+        if meaning.startswith("/"):
+            assert meaning.split()[0] in known
 
 
 def test_help_card_has_all_sections_and_commands():
@@ -136,8 +139,11 @@ def test_help_card_is_honest_about_limits():
 
     assert "Чего не умею" in text
     # Ограничения — это обещание: если убрать строку, карточка начнёт врать.
-    for limit in ("дату", "несколько действий", "недельный разбор"):
+    for limit in ("переносы", "несколько действий", "недельный разбор"):
         assert limit in text, limit
+    # Разовые тренировки на дату умеем (R-35): карточка не должна утверждать
+    # обратное — ложное ограничение хуже отсутствующего.
+    assert "только недельное расписание" not in text
     # Про Ollama в карточке строки нет: подсказка «модель не запущена» приходит
     # в момент, когда владелец пишет свободный текст, — там она уместнее.
     assert "Ollama" not in text

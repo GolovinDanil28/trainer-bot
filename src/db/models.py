@@ -4,9 +4,9 @@
 «день недели + время». Логики здесь нет, только хранение.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Date, DateTime, Float, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.reminders import ReminderStatus
@@ -17,8 +17,15 @@ class Workout(Base):
     __tablename__ = "workout"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    workout_type: Mapped[str] = mapped_column(String(16))
+    # Свободный тип (R-33): «бег», «интервальный бег»; 32 — верхняя граница.
+    workout_type: Mapped[str] = mapped_column(String(32))
     duration_min: Mapped[int]
+    # Дистанция (R-32): хранится рядом с минутами, а не вместо них.
+    distance_km: Mapped[float | None] = mapped_column(Float, default=None)
+    # Разовая тренировка (R-35): дата вместо дней недели в `schedule`, а время
+    # живёт рядом с датой, потому что строки расписания у неё нет.
+    date_once: Mapped[date | None] = mapped_column(Date, default=None)
+    time_once: Mapped[str | None] = mapped_column(String(5), default=None)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 

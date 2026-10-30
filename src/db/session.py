@@ -47,8 +47,37 @@ def _configure_sqlite(engine: Engine) -> None:
 
 
 def init_db(engine: Engine) -> None:
-    """Создать отсутствующие таблицы. Идемпотентно: повторный вызов безопасен."""
+    """Создать отсутствующие таблицы и догнать схему. Идемпотентно."""
     Base.metadata.create_all(engine)
+    apply_migrations(engine)
+
+
+# Колонки, добавленные после первого релиза. `create_all` умеет создавать
+# только отсутствующие таблицы, поэтому старые базы надо догонять руками.
+# Список данных, а не механизм версий: две добавки — это не фреймворк (§8.2).
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # (таблица, колонка, тип SQL)
+    ("workout", "distance_km", "FLOAT"),
+    ("workout", "date_once", "DATE"),
+    ("workout", "time_once", "TEXT"),
+)
+
+
+def apply_migrations(engine: Engine) -> None:
+    """Добавить недостающие колонки. Повторный вызов безопасен."""
+    if engine.dialect.name != "sqlite":
+        # Схема v1 живёт на SQLite; для других движков миграции делались бы
+        # инструментом, а не pragma-проверкой.
+        return
+    with engine.begin() as connection:
+        for table, column, sql_type in _ADDED_COLUMNS:
+            existing = {
+                row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table})")
+            }
+            if column not in existing:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"
+                )
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
