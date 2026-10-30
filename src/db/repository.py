@@ -21,7 +21,7 @@ from src.core.reminders import (
     ReminderMessage,
     ReminderStatus,
 )
-from src.core.schedule import Weekday, WorkoutDraft, WorkoutType, WorkoutView
+from src.core.schedule import Weekday, WorkoutDraft, WorkoutView
 from src.core.wellness import WellnessEntry
 from src.db.models import Checkin, Reminder, Schedule, Wellness, Workout
 
@@ -29,8 +29,11 @@ from src.db.models import Checkin, Reminder, Schedule, Wellness, Workout
 def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
     """Создать тренировку и все записи расписания одной транзакцией."""
     workout = Workout(
-        workout_type=draft.workout_type.value,
+        workout_type=str(draft.workout_type),
         duration_min=draft.duration_min,
+        distance_km=draft.distance_km,
+        date_once=draft.date_once,
+        time_once=draft.time_once.strftime("%H:%M") if draft.time_once else None,
     )
     workout.schedules = [
         Schedule(weekday=int(day), time_of_day=draft.time_of_day.strftime("%H:%M"))
@@ -43,12 +46,23 @@ def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
     return to_view(workout)
 
 
-def list_active(session: Session) -> list[WorkoutView]:
-    """Активные тренировки, стабильно отсортированные по id."""
+def list_active(session: Session, today: date | None = None) -> list[WorkoutView]:
+    """Активные тренировки, стабильно отсортированные по id.
+
+    `today` скрывает прошедшие разовые (R-35): тренировка, которую уже не
+    провести, не должна висеть в расписании. Недельные не фильтруются.
+    """
     workouts = session.scalars(
         select(Workout).where(Workout.is_active.is_(True)).order_by(Workout.id)
     ).all()
-    return [to_view(workout) for workout in workouts]
+    views = [to_view(workout) for workout in workouts]
+    if today is None:
+        return views
+    return [
+        view
+        for view in views
+        if view.date_once is None or view.date_once >= today
+    ]
 
 
 def deactivate(session: Session, workout_id: int) -> bool:
@@ -125,7 +139,7 @@ def reminder_message(session: Session, reminder_id: int) -> ReminderMessage | No
         return None
 
     reminder, workout = row
-    workout_type = WorkoutType(workout.workout_type)
+    workout_type = workout.workout_type
     # В v1 у тренировки одна длительность, поэтому она берётся из workout,
     # а не из расписания: `/new` не спрашивает разное время для разных дней.
     return ReminderMessage(
@@ -223,7 +237,7 @@ def recent_history(session: Session, limit: int = 5) -> list[HistoryEntry]:
     return [
         HistoryEntry(
             scheduled_at_utc=_as_utc(reminder.scheduled_at),
-            workout_type=WorkoutType(workout.workout_type),
+            workout_type=workout.workout_type,
             checkin=CheckinStatus(checkin.status) if checkin is not None else None,
         )
         for reminder, workout, checkin in rows
@@ -260,6 +274,34 @@ def active_schedule_rows(session: Session) -> list[tuple[int, int, str]]:
         .order_by(Schedule.workout_id, Schedule.weekday, Schedule.time_of_day)
     ).all()
     return [(row.workout_id, row.weekday, row.time_of_day) for row in rows]
+
+
+def active_once_rows(session: Session) -> list[tuple[int, date, str]]:
+    """Разовые тренировки для тика: `(workout_id, дата, "HH:MM")` (R-35)."""
+    rows = session.execute(
+        select(Workout.id, Workout.date_once, Workout.time_once).where(
+            Workout.is_active.is_(True),
+            Workout.date_once.is_not(None),
+            Workout.time_once.is_not(None),
+        )
+    )
+    return [(row.id, row.date_once, row.time_once) for row in rows]
+
+
+def workouts_for_day(session: Session, day: date) -> list[WorkoutView]:
+    """Тренировки на календарный день: недельные + разовая на эту дату (R-35)."""
+    weekly = workouts_for_weekday(session, Weekday(day.weekday()))
+    once = session.scalars(
+        select(Workout).where(
+            Workout.is_active.is_(True),
+            Workout.date_once == day,
+        )
+    ).all()
+    # Порядок — по id, как у всех списков: план не должен зависеть от того,
+    # в каком порядке база вернула строки.
+    views = {view.id: view for view in weekly}
+    views.update({view.id: to_view(view) for view in once})
+    return [views[key] for key in sorted(views)]
 
 
 def workouts_for_weekday(session: Session, weekday: Weekday) -> list[WorkoutView]:
@@ -420,13 +462,18 @@ def to_view(workout: Workout) -> WorkoutView:
     """Модель БД → структура домена для показа пользователю."""
     active = [row for row in workout.schedules if row.is_active]
     days = tuple(sorted(Weekday(row.weekday) for row in active))
-    # В v1 у тренировки одно время на все дни (его задаёт `/new`), поэтому
-    # берём минимальное строкой — результат не зависит от порядка строк в БД.
-    moment = min(row.time_of_day for row in active)
+    # У разовой тренировки строк расписания нет: время живёт в `time_once`.
+    # У недельной в v1 одно время на все дни (его задаёт `/new`), поэтому
+    # достаточно любой строки; порядок в БД на результат не влияет.
+    raw_moment = active[0].time_of_day if active else workout.time_once
+    moment = time.fromisoformat(raw_moment) if raw_moment else time(0, 0)
     return WorkoutView(
         id=workout.id,
-        workout_type=WorkoutType(workout.workout_type),
+        workout_type=workout.workout_type,
         weekdays=days,
-        time_of_day=time.fromisoformat(moment),
+        time_of_day=moment,
         duration_min=workout.duration_min,
+        distance_km=workout.distance_km,
+        date_once=workout.date_once,
+        time_once=time.fromisoformat(workout.time_once) if workout.time_once else None,
     )

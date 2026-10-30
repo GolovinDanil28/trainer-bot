@@ -20,7 +20,6 @@ from src.core.messages import (
     format_wellness_saved,
 )
 from src.core.plan import build_plan
-from src.core.schedule import Weekday
 from src.core.wellness import (
     WellnessCommandError,
     WellnessScore,
@@ -119,5 +118,5 @@ class WellnessService:
 
     def _render_plan(self, session: Session, today: date, score: int) -> str:
         tomorrow = today + timedelta(days=1)
-        workouts = repository.workouts_for_weekday(session, Weekday(tomorrow.weekday()))
+        workouts = repository.workouts_for_day(session, tomorrow)
         return format_plan(build_plan(WellnessScore(score), workouts))

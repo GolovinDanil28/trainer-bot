@@ -21,10 +21,9 @@ from src.core.plan import (
 from src.core.reminders import CHECKIN_STATUS_LABELS, CheckinStatus, ReminderMessage
 from src.core.schedule import (
     WEEKDAY_SHORT,
-    WORKOUT_TYPE_LABELS,
     Weekday,
-    WorkoutDraft,
     WorkoutView,
+    workout_label,
 )
 
 EMPTY_LIST_HINT = "Пока нет тренировок.\nСоздай первую: /new strength Пн,Ср,Пт 19:30"
@@ -38,30 +37,32 @@ def format_time(moment: time) -> str:
     return moment.strftime("%H:%M")
 
 
+def format_volume(workout: WorkoutView) -> str:
+    """Длительность в человеческом виде: дистанция + примерные минуты (R-32)."""
+    if workout.distance_km is None:
+        return f"{workout.duration_min} мин"
+    km = f"{workout.distance_km:g} км"
+    return f"{km} (≈{workout.duration_min} мин)"
+
+
+def format_when(workout: WorkoutView) -> str:
+    """Когда тренировка: день недели у недельной, дата у разовой (R-35)."""
+    if workout.date_once is not None:
+        return workout.date_once.strftime("%d.%m")
+    return format_weekdays(workout.weekdays)
+
+
 def _line(workout: WorkoutView) -> str:
     return (
-        f"#{workout.id} — {WORKOUT_TYPE_LABELS[workout.workout_type]}, "
-        f"{format_weekdays(workout.weekdays)}, "
-        f"{format_time(workout.time_of_day)} ({workout.duration_min} мин)"
+        f"#{workout.id} — {workout_label(workout.workout_type)}, "
+        f"{format_when(workout)}, "
+        f"{format_time(workout.time_of_day)} ({format_volume(workout)})"
     )
 
 
 def format_created(workout: WorkoutView) -> str:
     """Подтверждение после `/new` (R-01)."""
     return f"Готово: {_line(workout)}."
-
-
-def format_draft_created(workout_id: int, draft: WorkoutDraft) -> str:
-    """Подтверждение, когда тренировка только что создана и known id."""
-    return format_created(
-        WorkoutView(
-            id=workout_id,
-            workout_type=draft.workout_type,
-            weekdays=draft.weekdays,
-            time_of_day=draft.time_of_day,
-            duration_min=draft.duration_min,
-        )
-    )
 
 
 def format_schedule(workouts: Sequence[WorkoutView]) -> str:
@@ -106,7 +107,7 @@ def format_history(entries: Sequence[HistoryEntry], zone: ZoneInfo) -> str:
             if entry.checkin is None
             else CHECKIN_STATUS_LABELS[entry.checkin]
         )
-        workout = WORKOUT_TYPE_LABELS[entry.workout_type]
+        workout = workout_label(entry.workout_type)
         lines.append(f"{moment:%d.%m.%Y %H:%M} — {workout}, {result}")
     return "\n".join(lines)
 
@@ -115,7 +116,7 @@ def format_reminder(message: ReminderMessage, zone: ZoneInfo) -> str:
     """Текст напоминания (R-07): тип, длительность и время в таймзоне пользователя."""
     local_time = message.scheduled_at_utc.astimezone(zone).strftime("%H:%M")
     return (
-        f"Пора тренироваться: {WORKOUT_TYPE_LABELS[message.workout_type]}, "
+        f"Пора тренироваться: {workout_label(message.workout_type)}, "
         f"{message.duration_min} мин, {local_time}.\n"
         "Отметь результат кнопкой ниже."
     )
@@ -173,7 +174,7 @@ HELP_PLAN_RULES = (
 HELP_LIMITS = (
     "Чего не умею:\n"
     "— разовые переносы («завтра не смогу»);\n"
-    "— тренировку на конкретную дату, только недельное расписание;\n"
+    "— замену одной тренировки другой;\n"
     "— несколько действий в одной фразе;\n"
     "— недельный разбор и план на следующую неделю."
 )
@@ -278,10 +279,35 @@ def format_plan(plan: DayPlan) -> str:
     lines = [header]
     for item in plan.items:
         line = (
-            f"— {WORKOUT_TYPE_LABELS[item.workout_type]}, "
+            f"— {workout_label(item.workout_type)}, "
             f"{format_time(item.time_of_day)}, {item.duration_min} мин"
         )
         if item.duration_min != item.original_duration_min:
             line += f" (обычно {item.original_duration_min})"
         lines.append(line)
     return "\n".join(lines)
+
+# --- уточнение типа (R-34) ------------------------------------------------
+
+
+def format_type_choice(options: tuple[str, ...]) -> str:
+    """Вопрос вместо создания: тип не выбран, БД не тронута."""
+    return (
+        "Уточни, какую тренировку создать: " + " или ".join(options) + ".\n"
+        "Выбери кнопкой ниже."
+    )
+
+
+CHOICE_EXPIRED_TEXT = (
+    "Уточнение устарело, ничего не создал. Сформулируй фразу заново — "
+    "одним сообщением."
+)
+CHOICE_DONE_TEXT = "Эту тренировку уже создал — второй не будет."
+
+
+def format_date_unclear(raw: str) -> str:
+    """Дата не распознана или уже прошла: подсказка, а не молчание (R-35)."""
+    return (
+        f"Не понял дату «{raw}». Назови «сегодня», «завтра» или «28.10» — "
+        "и не раньше сегодняшнего дня."
+    )

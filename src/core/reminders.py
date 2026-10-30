@@ -9,8 +9,6 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
 
-from src.core.schedule import WorkoutType
-
 
 class ReminderStatus(StrEnum):
     PENDING = "pending"
@@ -94,7 +92,7 @@ class ReminderMessage:
 
     reminder_id: int
     workout_id: int
-    workout_type: WorkoutType
+    workout_type: str
     duration_min: int
     scheduled_at_utc: datetime
 

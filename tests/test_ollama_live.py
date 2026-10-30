@@ -114,6 +114,22 @@ HOLDOUT = [
 ]
 
 
+def canonical_type(value: str) -> str:
+    """Свободный тип (R-33) → известная категория, если она узнаётся.
+
+    Модель теперь возвращает слова владельца («кардио», «растяжка»), а корпус
+    написан старыми значениями — сравниваем в каноне, а не по написанию.
+    """
+    low = value.lower()
+    if "кардио" in low or "cardio" in low:
+        return "cardio"
+    if "силов" in low or "strength" in low:
+        return "strength"
+    if "мобильн" in low or "растяжк" in low or "mobility" in low:
+        return "mobility"
+    return value
+
+
 def matches(intent: AssistantIntent, expected: tuple, allowed_times: set[str] | None) -> bool:
     kind = expected[0]
     if kind == "none":
@@ -125,7 +141,7 @@ def matches(intent: AssistantIntent, expected: tuple, allowed_times: set[str] | 
 
     if intent.action is not AssistantAction.CREATE:
         return False
-    if intent.type is None or intent.type.value != expected[1]:
+    if intent.type is None or canonical_type(intent.type) != expected[1]:
         return False
     if intent.days is None or tuple(WEEKDAY_SHORT[day] for day in intent.days) != expected[2]:
         return False
@@ -197,3 +213,28 @@ async def test_live_model_corpus_and_holdout():
     # Порог ниже замеров spike (92 %): тест ловит деградацию, а не шум модели.
     assert corpus["accuracy"] >= 0.85
     assert holdout["accuracy"] >= 0.75
+
+
+async def test_live_model_accepts_free_type_and_distance():
+    """R-33 и R-32: «бег» — валидный тип, «7 км» — дистанция, а не мусор."""
+    client = make_client()
+    phrase = "интервальный бег 7 км по средам в 19:00"
+    raw = await client.intent_json(phrase, SNAPSHOT)
+    intent = parse_intent(raw, phrase)
+
+    assert intent.action is AssistantAction.CREATE
+    assert intent.type is not None and "бег" in intent.type
+    assert intent.distance_km == 7
+
+
+async def test_live_model_extracts_date_token():
+    """R-35: дата приходит токеном («завтра»), а не вычисленной моделью."""
+    client = make_client()
+    phrase = "бег завтра в 19:00 на 7 км"
+    raw = await client.intent_json(phrase, SNAPSHOT)
+    intent = parse_intent(raw, phrase)
+
+    assert intent.action is AssistantAction.CREATE
+    assert intent.date_raw == "завтра"
+    assert intent.days is None
+    assert intent.distance_km == 7

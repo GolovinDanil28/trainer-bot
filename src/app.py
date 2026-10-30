@@ -19,7 +19,7 @@ from telegram.ext import (
 
 from src.bot.access import OWNER_KEY
 from src.bot.assistant_service import AssistantService
-from src.bot.callbacks import on_checkin, on_wellness
+from src.bot.callbacks import on_checkin, on_type_choice, on_wellness
 from src.bot.handlers import (
     cmd_help,
     cmd_history,
@@ -31,6 +31,7 @@ from src.bot.handlers import (
     cmd_wellness,
     on_free_text,
 )
+from src.bot.pending import PendingChoices
 from src.bot.service import WorkoutService
 from src.bot.telegram_sender import TelegramSender, TelegramWellnessSender
 from src.bot.wellness_service import WellnessService
@@ -105,6 +106,9 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("plan", cmd_plan))
     application.add_handler(CallbackQueryHandler(on_checkin, pattern=r"^ci:"))
     application.add_handler(CallbackQueryHandler(on_wellness, pattern=r"^wl:"))
+    application.add_handler(
+        CallbackQueryHandler(on_type_choice, pattern=r"^tc:")
+    )
     # Свободный текст — только сообщения, не команды; владельца проверяет
     # `owner_only` внутри хендлера (R-18).
     application.add_handler(
@@ -123,6 +127,8 @@ def build_application(settings: Settings, runtime: Runtime | None = None) -> App
     )
     application.bot_data["workout_service"] = runtime.service
     application.bot_data["wellness_service"] = runtime.wellness
+    # Уточнения типа живут в памяти процесса и стареют сами (R-34).
+    application.bot_data["pending_choices"] = PendingChoices()
     # Свободный текст: клиент, таймаут и домен-операции — по D1/D7. Клиент не
     # ходит в сеть до первого сообщения, поэтому старт без Ollama безопасен.
     translator = OllamaClient(

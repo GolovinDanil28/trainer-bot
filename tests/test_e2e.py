@@ -39,7 +39,7 @@ async def test_new_tick_tap_history(session_factory):
     assert first.claimed == [1]
     assert len(sender.sent) == 1
     message = sender.sent[0]
-    assert message.workout_type is WorkoutType.STRENGTH
+    assert message.workout_type == WorkoutType.STRENGTH
     assert message.scheduled_at_utc == MOMENT
 
     # Повторный тик в том же окне не отправляет второй раз (R-06).
