@@ -44,6 +44,7 @@ def test_application_registers_commands(tmp_path):
         "history",
         "wellness",
         "plan",
+        "week",
     }
 
 

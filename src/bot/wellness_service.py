@@ -7,7 +7,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,10 +16,11 @@ from src.core.messages import (
     format_plan,
     format_plan_without_score,
     format_stale_wellness_button,
+    format_weekly_review,
     format_wellness_command_hint,
     format_wellness_saved,
 )
-from src.core.plan import build_plan
+from src.core.plan import build_plan, build_weekly_review, week_window
 from src.core.wellness import (
     WellnessCommandError,
     WellnessScore,
@@ -94,7 +95,8 @@ class WellnessService:
     def show_plan(self, now_utc: datetime | None = None) -> str:
         """`/plan`: план на завтра или подсказка, если оценки нет (R-25).
 
-        Читает и ничего не пишет: R-24 — план не меняет расписание.
+        Пишет только снимок показанного плана (R-36); расписание, тренировки
+        и напоминания не трогает (R-24).
         """
         moment = now_utc or self._clock()
         today = self._today(moment)
@@ -106,6 +108,31 @@ class WellnessService:
             # инварианта и превратил её в ValueError из WellnessScore.
             assert entry.score is not None
             return self._render_plan(session, today, entry.score)
+
+    def weekly_review(self, now_utc: datetime | None = None) -> str:
+        """`/week`: разбор последней завершённой недели (R-37).
+
+        Только чтение и арифметика: модели здесь нет, поэтому команда работает
+        и без Ollama (D6).
+        """
+        moment = now_utc or self._clock()
+        today = self._today(moment)
+        week_start, week_end = week_window(today)
+
+        start_utc = datetime.combine(week_start, time.min, tzinfo=self._zone)
+        end_utc = datetime.combine(week_end + timedelta(days=1), time.min, tzinfo=self._zone)
+        with self._session_factory() as session:
+            snapshots = repository.week_snapshots(session, week_start, week_end)
+            reminders = repository.week_reminders(session, start_utc, end_utc)
+            wellness = {
+                entry.day: entry
+                for entry in repository.wellness_range(session, week_start, week_end)
+            }
+
+        review = build_weekly_review(
+            snapshots, reminders, wellness, week_start, week_end, self._zone
+        )
+        return format_weekly_review(review)
 
     def _today(self, now_utc: datetime) -> date:
         """Календарный день пользователя для момента в UTC."""
@@ -119,4 +146,9 @@ class WellnessService:
     def _render_plan(self, session: Session, today: date, score: int) -> str:
         tomorrow = today + timedelta(days=1)
         workouts = repository.workouts_for_day(session, tomorrow)
-        return format_plan(build_plan(WellnessScore(score), workouts))
+        plan = build_plan(WellnessScore(score), workouts)
+        # Снимок пишется здесь, в единственной точке показа плана (R-36):
+        # и вечерний ответ, и /plan проходят через неё, поэтому «показали, но
+        # не сохранили» невозможно.
+        repository.save_plan_snapshot(session, tomorrow, plan)
+        return format_plan(plan)

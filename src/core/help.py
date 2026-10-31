@@ -35,6 +35,7 @@ COMMANDS: tuple[CommandHelp, ...] = (
     CommandHelp("/history", "последние отметки", "/history"),
     CommandHelp("/wellness", "самочувствие за сегодня", "/wellness 3 не выспался"),
     CommandHelp("/plan", "план на завтра", "/plan"),
+    CommandHelp("/week", "разбор прошедшей недели", "/week"),
 )
 
 FREE_TEXT_EXAMPLES: tuple[tuple[str, str], ...] = (
