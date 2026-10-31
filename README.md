@@ -150,7 +150,7 @@ trainer-bot/
 | Реализация | MVP: расписание, доставка, отметки, журнал, свободный текст, самочувствие, план на завтра, справка; changes `trainer-bot-schedule`, `trainer-bot-nl-schedule`, `trainer-bot-wellness-plan` и `trainer-bot-help` в архиве |
 | Тесты | домен, доставка, бот, LLM-слой и план покрыты тестами; запуск — `pytest -q`; живой прогон — `RUN_OLLAMA_TESTS=1 pytest -q` |
 | Деплой | нет |
-| Следующая спека | `trainer-bot-plan-history` — снимки плана и недельный разбор |
+| Следующая спека | `trainer-bot-plan-history` — снимки плана и недельный разбор (спека в работе) |
 
 ## Документация
 
