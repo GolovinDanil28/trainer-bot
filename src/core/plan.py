@@ -46,6 +46,8 @@ class PlanItem:
     original_duration_min: int
     # Нужен снимку (R-36): по нему элемент плана сопоставляется с отметкой.
     workout_id: int | None = None
+    # Дистанция только для показа (R-39): правило плана считается в минутах.
+    distance_km: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,7 @@ def build_plan(score: WellnessScore, workouts: Sequence[WorkoutView]) -> DayPlan
                 duration_min=reduced_duration(workout.duration_min),
                 original_duration_min=workout.duration_min,
                 workout_id=workout.id,
+                distance_km=workout.distance_km,
             )
             for workout in workouts
         )
@@ -96,6 +99,7 @@ def build_plan(score: WellnessScore, workouts: Sequence[WorkoutView]) -> DayPlan
                 duration_min=workout.duration_min,
                 original_duration_min=workout.duration_min,
                 workout_id=workout.id,
+                distance_km=workout.distance_km,
             )
             for workout in workouts
         )
@@ -177,12 +181,21 @@ class WeeklyReview:
     rest_days: int
     misses: tuple[MissedItem, ...]
     advice: ScheduleAdvice
+    # Элементы, отсечённые `until`: время ещё не наступило. Отдельно от
+    # «в плане ничего не стояло» — иначе разбор врёт (найдено ревью).
+    upcoming: int = 0
 
 
 def week_window(today: date) -> tuple[date, date]:
     """Последняя завершённая календарная неделя: пн–вс (D3)."""
     monday = today - timedelta(days=today.weekday())
     return monday - timedelta(days=7), monday - timedelta(days=1)
+
+
+def current_week(today: date) -> tuple[date, date]:
+    """Текущая неделя пн–вс, включая сегодня: для воскресного разбора (R-40)."""
+    monday = today - timedelta(days=today.weekday())
+    return monday, monday + timedelta(days=6)
 
 
 # Порог «низкого самочувствия» в совете: средняя оценка по дням пропусков.
@@ -210,14 +223,20 @@ def build_weekly_review(
     week_start: date,
     week_end: date,
     zone: ZoneInfo,
+    until: datetime | None = None,
 ) -> WeeklyReview:
-    """Собрать разбор недели. Одинаковый вход — одинаковый разбор (R-37)."""
+    """Собрать разбор недели. Одинаковый вход — одинаковый разбор (R-37).
+
+    `until` — момент, позже которого элементы ещё не наступили: воскресный
+    разбор в 20:00 не должен объявлять пропущенной тренировку в 21:00.
+    Для `/week` (`until=None`) учитывается вся неделя.
+    """
     by_key: dict[tuple[int, date, str], WeekReminder] = {}
     for reminder in reminders:
         local = reminder.scheduled_at_utc.astimezone(zone)
         by_key[(reminder.workout_id, local.date(), local.strftime("%H:%M"))] = reminder
 
-    total = done = rest_days = 0
+    total = done = rest_days = upcoming = 0
     misses: list[MissedItem] = []
     in_week = [
         snapshot
@@ -230,6 +249,15 @@ def build_weekly_review(
             rest_days += 1
             continue
         for item in snapshot.items:
+            if until is not None:
+                moment = datetime.combine(
+                    snapshot.plan_date, item.time_of_day, tzinfo=zone
+                )
+                if moment > until:
+                    # Ещё не наступило — не «сделано» и не «пропущено»,
+                    # но и не «в плане ничего не было».
+                    upcoming += 1
+                    continue
             total += 1
             key = (
                 item.workout_id,
@@ -260,6 +288,7 @@ def build_weekly_review(
         rest_days=rest_days,
         misses=tuple(misses),
         advice=_advice(total, done, misses),
+        upcoming=upcoming,
     )
 
 

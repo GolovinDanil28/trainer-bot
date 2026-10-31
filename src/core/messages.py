@@ -17,6 +17,7 @@ from src.core.plan import (
     REST_MAX_SCORE,
     DayPlan,
     MissReason,
+    PlanItem,
     ScheduleAdvice,
     WeeklyReview,
 )
@@ -39,12 +40,15 @@ def format_time(moment: time) -> str:
     return moment.strftime("%H:%M")
 
 
-def format_volume(workout: WorkoutView) -> str:
-    """Длительность в человеческом виде: дистанция + примерные минуты (R-32)."""
-    if workout.distance_km is None:
-        return f"{workout.duration_min} мин"
-    km = f"{workout.distance_km:g} км"
-    return f"{km} (≈{workout.duration_min} мин)"
+def format_volume(distance_km: float | None, duration_min: int) -> str:
+    """Объём тренировки: «7 км (≈70 мин)» или «70 мин» (R-32, R-39).
+
+    Одна функция на /list, напоминание и план: три текста не должны
+    расходиться в трёх местах.
+    """
+    if distance_km is None:
+        return f"{duration_min} мин"
+    return f"{distance_km:g} км (≈{duration_min} мин)"
 
 
 def format_when(workout: WorkoutView) -> str:
@@ -58,7 +62,8 @@ def _line(workout: WorkoutView) -> str:
     return (
         f"#{workout.id} — {workout_label(workout.workout_type)}, "
         f"{format_when(workout)}, "
-        f"{format_time(workout.time_of_day)} ({format_volume(workout)})"
+        f"{format_time(workout.time_of_day)} "
+        f"({format_volume(workout.distance_km, workout.duration_min)})"
     )
 
 
@@ -119,7 +124,8 @@ def format_reminder(message: ReminderMessage, zone: ZoneInfo) -> str:
     local_time = message.scheduled_at_utc.astimezone(zone).strftime("%H:%M")
     return (
         f"Пора тренироваться: {workout_label(message.workout_type)}, "
-        f"{message.duration_min} мин, {local_time}.\n"
+        f"{format_volume(message.distance_km, message.duration_min)}, "
+        f"{local_time}.\n"
         "Отметь результат кнопкой ниже."
     )
 
@@ -280,14 +286,26 @@ def format_plan(plan: DayPlan) -> str:
 
     lines = [header]
     for item in plan.items:
-        line = (
+        lines.append(
             f"— {workout_label(item.workout_type)}, "
-            f"{format_time(item.time_of_day)}, {item.duration_min} мин"
+            f"{format_time(item.time_of_day)}, {format_plan_volume(item)}"
         )
-        if item.duration_min != item.original_duration_min:
-            line += f" (обычно {item.original_duration_min})"
-        lines.append(line)
     return "\n".join(lines)
+
+
+def format_plan_volume(item: PlanItem) -> str:
+    """Объём в плане: при облегчении — «7 км (≈45 мин, обычно 70 мин)».
+
+    Две скобки подряд читались как разные величины; здесь всё в одной паре.
+    """
+    if item.duration_min == item.original_duration_min:
+        return format_volume(item.distance_km, item.duration_min)
+    if item.distance_km is None:
+        return f"{item.duration_min} мин (обычно {item.original_duration_min} мин)"
+    return (
+        f"{item.distance_km:g} км "
+        f"(≈{item.duration_min} мин, обычно {item.original_duration_min} мин)"
+    )
 
 # --- уточнение типа (R-34) ------------------------------------------------
 
@@ -387,6 +405,15 @@ def format_weekly_review(review: WeeklyReview) -> str:
                 header,
                 f"Бот советовал отдых "
                 f"{review.rest_days} {plural_days(review.rest_days)}.",
+                "",
+                ADVICE_TEXTS[review.advice],
+                WEEK_SCHEDULE_FOOTER,
+            ]
+        elif review.upcoming:
+            lines = [
+                header,
+                "Пока нечего считать: тренировки сегодня ещё впереди — они "
+                "войдут в следующий разбор.",
                 "",
                 ADVICE_TEXTS[review.advice],
                 WEEK_SCHEDULE_FOOTER,

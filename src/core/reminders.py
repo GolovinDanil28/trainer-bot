@@ -95,6 +95,7 @@ class ReminderMessage:
     workout_type: str
     duration_min: int
     scheduled_at_utc: datetime
+    distance_km: float | None = None
 
 
 class ReminderSender(Protocol):

@@ -6,9 +6,9 @@
 """
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import delete, func, literal, select, update
+from sqlalchemy import delete, func, literal, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -35,6 +35,7 @@ from src.db.models import (
     PlanSnapshotItem,
     Reminder,
     Schedule,
+    WeeklyReport,
     Wellness,
     Workout,
 )
@@ -162,6 +163,7 @@ def reminder_message(session: Session, reminder_id: int) -> ReminderMessage | No
         workout_type=workout_type,
         duration_min=workout.duration_min,
         scheduled_at_utc=_as_utc(reminder.scheduled_at),
+        distance_km=workout.distance_km,
     )
 
 
@@ -596,3 +598,74 @@ def wellness_range(
         .order_by(Wellness.day)
     )
     return [_wellness_entry(row) for row in rows]
+
+
+# Сколько живёт claim без доставки, прежде чем его перехватят снова. Тот же
+# смысл, что у «зависшего» pending напоминания: крах процесса не должен съедать
+# неделю.
+WEEKLY_REPORT_STUCK_WINDOW = timedelta(minutes=10)
+
+
+def claim_weekly_report(
+    session: Session,
+    week_start: date,
+    now_utc: datetime,
+    stale_after: timedelta = WEEKLY_REPORT_STUCK_WINDOW,
+) -> bool:
+    """Взять право на разбор недели. `False` — отправлен или уже в работе (R-40).
+
+    Три состояния строки: нет строки — право свободно; `sent_at` заполнен —
+    отправлено; `sent_at` пуст и `claimed_at` свежий — кто-то уже пытается;
+    `sent_at` пуст, но claim протух — процесс умер, право перехватывается.
+    """
+    result = session.execute(
+        sqlite_insert(WeeklyReport)
+        .values(week_start=week_start, claimed_at=_naive_utc(now_utc))
+        .on_conflict_do_nothing(index_elements=["week_start"])
+    )
+    session.commit()
+    if result.rowcount == 1:
+        return True
+
+    # Перехват — одним UPDATE с условием, а не «прочитали и записали»:
+    # иначе два процесса, увидевшие один протухший claim, оба решили бы, что
+    # право их. claimed_at = NULL (старая база) считается протухшим.
+    cutoff = _naive_utc(now_utc - stale_after)
+    taken = session.execute(
+        update(WeeklyReport)
+        .where(
+            WeeklyReport.week_start == week_start,
+            WeeklyReport.sent_at.is_(None),
+            or_(
+                WeeklyReport.claimed_at.is_(None),
+                WeeklyReport.claimed_at <= cutoff,
+            ),
+        )
+        .values(claimed_at=_naive_utc(now_utc))
+    )
+    session.commit()
+    return taken.rowcount == 1
+
+
+def mark_weekly_report_sent(
+    session: Session, week_start: date, now_utc: datetime
+) -> None:
+    """Отметить доставку: с этого момента claim не перехватывается (R-40)."""
+    session.execute(
+        update(WeeklyReport)
+        .where(WeeklyReport.week_start == week_start)
+        .values(sent_at=_naive_utc(now_utc))
+    )
+    session.commit()
+
+
+def release_weekly_report(session: Session, week_start: date) -> bool:
+    """Вернуть право, если отправка сорвалась; отправленное не трогаем (R-40)."""
+    result = session.execute(
+        delete(WeeklyReport).where(
+            WeeklyReport.week_start == week_start,
+            WeeklyReport.sent_at.is_(None),
+        )
+    )
+    session.commit()
+    return result.rowcount > 0

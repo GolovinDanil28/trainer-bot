@@ -168,3 +168,22 @@ class PlanSnapshotItem(Base):
     )
 
     snapshot: Mapped[PlanSnapshot] = relationship(back_populates="items")
+
+
+class WeeklyReport(Base):
+    """Право на отправку недельного разбора (R-40).
+
+    Одна строка на неделю: уникальность `week_start` делает отправку
+    однократной даже после рестарта — та же механика, что у `wellness` и
+    напоминаний.
+    """
+
+    __tablename__ = "weekly_report"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    week_start: Mapped[date] = mapped_column(Date, unique=True)
+    # claim — право попробовать; sent_at заполняется только после доставки.
+    # Если процесс умер между ними, claim считается протухшим и перехватывается
+    # повторно — иначе неделя терялась бы молча.
+    claimed_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    sent_at: Mapped[datetime | None] = mapped_column(default=None)

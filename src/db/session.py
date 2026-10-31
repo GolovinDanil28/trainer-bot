@@ -60,6 +60,7 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("workout", "distance_km", "FLOAT"),
     ("workout", "date_once", "DATE"),
     ("workout", "time_once", "TEXT"),
+    ("weekly_report", "claimed_at", "DATETIME"),
 )
 
 
@@ -74,6 +75,9 @@ def apply_migrations(engine: Engine) -> None:
             existing = {
                 row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table})")
             }
+            if not existing:
+                # Таблицы ещё нет: её создаст create_all целиком, ALTER не нужен.
+                continue
             if column not in existing:
                 connection.exec_driver_sql(
                     f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"

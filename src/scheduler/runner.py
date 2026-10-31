@@ -8,10 +8,12 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from src.scheduler.tick import SchedulerTick
+from src.scheduler.weekly_tick import WeeklyTick
 from src.scheduler.wellness_tick import WellnessTick
 
 JOB_ID = "reminder-tick"
 WELLNESS_JOB_ID = "wellness-tick"
+WEEKLY_JOB_ID = "weekly-tick"
 DEFAULT_INTERVAL_SECONDS = 30
 
 
@@ -19,6 +21,7 @@ def build_scheduler(
     tick: SchedulerTick,
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     wellness_tick: WellnessTick | None = None,
+    weekly_tick: WeeklyTick | None = None,
 ) -> AsyncIOScheduler:
     """Планировщик с интервальными job. Ещё не запущен."""
     scheduler = AsyncIOScheduler()
@@ -41,6 +44,17 @@ def build_scheduler(
             trigger="interval",
             seconds=interval_seconds,
             id=WELLNESS_JOB_ID,
+            max_instances=1,
+            coalesce=True,
+        )
+    if weekly_tick is not None:
+        # Свой job и свой порог («воскресенье, время ≥ 20:00»): общий job
+        # заставил бы недельный разбор делить `max_instances` с напоминаниями.
+        scheduler.add_job(
+            weekly_tick.run_now,
+            trigger="interval",
+            seconds=interval_seconds,
+            id=WEEKLY_JOB_ID,
             max_instances=1,
             coalesce=True,
         )

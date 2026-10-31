@@ -118,7 +118,16 @@ class WellnessService:
         moment = now_utc or self._clock()
         today = self._today(moment)
         week_start, week_end = week_window(today)
+        return self.weekly_review_for(week_start, week_end)
 
+    def weekly_review_for(
+        self, week_start: date, week_end: date, until: datetime | None = None
+    ) -> str:
+        """Разбор за явные границы недели: нужен и `/week`, и воскресному тику.
+
+        `/week` спрашивает про прошлую неделю, авторазбор — про текущую,
+        которая заканчивается сегодня (D3).
+        """
         start_utc = datetime.combine(week_start, time.min, tzinfo=self._zone)
         end_utc = datetime.combine(week_end + timedelta(days=1), time.min, tzinfo=self._zone)
         with self._session_factory() as session:
@@ -130,7 +139,7 @@ class WellnessService:
             }
 
         review = build_weekly_review(
-            snapshots, reminders, wellness, week_start, week_end, self._zone
+            snapshots, reminders, wellness, week_start, week_end, self._zone, until
         )
         return format_weekly_review(review)
 
