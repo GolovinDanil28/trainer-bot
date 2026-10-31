@@ -19,7 +19,6 @@ from src.core.help import (
 )
 from src.core.messages import format_help, format_start
 from src.core.plan import (
-    DURATION_STEP_MIN,
     LIGHT_SCORE,
     MIN_DURATION_MIN,
     REDUCTION_PERCENT,
@@ -163,10 +162,28 @@ def test_plan_rules_in_card_come_from_plan_constants():
     # измениться вместе с ней, иначе карточка начнёт врать молча.
     text = format_help()
 
-    assert f"1–{REST_MAX_SCORE}" in text
-    assert f"{LIGHT_SCORE} — {100 - REDUCTION_PERCENT} %" in text
-    assert f"вниз до {DURATION_STEP_MIN} минут" in text
-    assert f"не меньше {MIN_DURATION_MIN}" in text
+    assert f"оценка 1–{REST_MAX_SCORE}" in text
+    assert f"{LIGHT_SCORE} — тренировка на {100 - REDUCTION_PERCENT} %" in text
+    assert f"минимум {MIN_DURATION_MIN} минут" in text
+
+
+def test_card_examples_are_in_owner_language():
+    # R-33: тип — свободная фраза. Английские служебные значения в примерах
+    # учили бы команде, которой владелец не пользуется.
+    text = format_help().lower()
+
+    for legacy in ("strength", "cardio", "mobility"):
+        assert legacy not in text, legacy
+    assert "/new силовая" in text
+    assert "/new бег" in text
+
+
+def test_week_line_explains_what_is_inside():
+    text = format_help()
+
+    assert "сколько сделано" in text
+    assert "что мешало" in text
+    assert "что менять" in text
 
 
 def test_help_card_fits_one_message():
