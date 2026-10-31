@@ -29,6 +29,7 @@ from src.core.reminders import (
 )
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutView
 from src.core.wellness import WellnessEntry
+from src.db.context import current_user_id
 from src.db.models import (
     Checkin,
     PlanSnapshot,
@@ -41,9 +42,17 @@ from src.db.models import (
 )
 
 
-def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
+def _owner(user_id: int | None) -> int:
+    """Явный владелец или текущий из контекста (R-42)."""
+    return current_user_id() if user_id is None else user_id
+
+
+def create_workout(
+    session: Session, draft: WorkoutDraft, user_id: int | None = None
+) -> WorkoutView:
     """Создать тренировку и все записи расписания одной транзакцией."""
     workout = Workout(
+        user_id=_owner(user_id),
         workout_type=str(draft.workout_type),
         duration_min=draft.duration_min,
         distance_km=draft.distance_km,
@@ -61,14 +70,19 @@ def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
     return to_view(workout)
 
 
-def list_active(session: Session, today: date | None = None) -> list[WorkoutView]:
+def list_active(
+    session: Session, today: date | None = None, user_id: int | None = None
+) -> list[WorkoutView]:
     """Активные тренировки, стабильно отсортированные по id.
 
     `today` скрывает прошедшие разовые (R-35): тренировка, которую уже не
     провести, не должна висеть в расписании. Недельные не фильтруются.
     """
+    uid = _owner(user_id)
     workouts = session.scalars(
-        select(Workout).where(Workout.is_active.is_(True)).order_by(Workout.id)
+        select(Workout)
+        .where(Workout.is_active.is_(True), Workout.user_id == uid)
+        .order_by(Workout.id)
     ).all()
     views = [to_view(workout) for workout in workouts]
     if today is None:
@@ -80,7 +94,7 @@ def list_active(session: Session, today: date | None = None) -> list[WorkoutView
     ]
 
 
-def deactivate(session: Session, workout_id: int) -> bool:
+def deactivate(session: Session, workout_id: int, user_id: int | None = None) -> bool:
     """Выключить тренировку. Возвращает False, если такой активной нет.
 
     Вместе с тренировкой отменяются её ещё не отправленные напоминания (R-03,
@@ -88,7 +102,11 @@ def deactivate(session: Session, workout_id: int) -> bool:
     Отправленные и отвеченные не трогаем — это история.
     """
     workout = session.scalars(
-        select(Workout).where(Workout.id == workout_id, Workout.is_active.is_(True))
+        select(Workout).where(
+            Workout.id == workout_id,
+            Workout.is_active.is_(True),
+            Workout.user_id == _owner(user_id),
+        )
     ).one_or_none()
     if workout is None:
         return False
@@ -117,13 +135,27 @@ def _cancel_pending_reminders(session: Session, workout_id: int) -> int:
     return result.rowcount
 
 
-def claim_reminder(session: Session, workout_id: int, scheduled_at: datetime) -> int | None:
+def claim_reminder(
+    session: Session,
+    workout_id: int,
+    scheduled_at: datetime,
+    user_id: int | None = None,
+) -> int | None:
     """Занять момент напоминания. Возвращает id, если занял именно этот вызов.
 
     `INSERT … ON CONFLICT DO NOTHING` вместо «проверить и вставить»: проверка
     с последующей вставкой оставляет окно, в которое второй тик влезает и
     отправляет то же напоминание второй раз.
     """
+    # Чужую тренировку занять нельзя: проверка до вставки, потому что ключ
+    # уникальности не знает про владельца.
+    owner = session.scalar(
+        select(Workout.id).where(
+            Workout.id == workout_id, Workout.user_id == _owner(user_id)
+        )
+    )
+    if owner is None:
+        return None
     statement = (
         sqlite_insert(Reminder)
         .values(
@@ -139,7 +171,9 @@ def claim_reminder(session: Session, workout_id: int, scheduled_at: datetime) ->
     return reminder_id
 
 
-def reminder_message(session: Session, reminder_id: int) -> ReminderMessage | None:
+def reminder_message(
+    session: Session, reminder_id: int, user_id: int | None = None
+) -> ReminderMessage | None:
     """Собрать всё нужное для отправки: напоминание + его тренировка.
 
     Возвращает `None`, если строки нет: между захватом момента и отправкой
@@ -148,7 +182,7 @@ def reminder_message(session: Session, reminder_id: int) -> ReminderMessage | No
     row = session.execute(
         select(Reminder, Workout)
         .join(Workout, Reminder.workout_id == Workout.id)
-        .where(Reminder.id == reminder_id)
+        .where(Reminder.id == reminder_id, Workout.user_id == _owner(user_id))
     ).one_or_none()
     if row is None:
         return None
@@ -196,7 +230,10 @@ class CheckinOutcome:
 
 
 def record_checkin(
-    session: Session, reminder_id: int, action: CheckinAction
+    session: Session,
+    reminder_id: int,
+    action: CheckinAction,
+    user_id: int | None = None,
 ) -> CheckinOutcome | None:
     """Записать отметку. Возвращает `None`, если напоминания нет.
 
@@ -204,7 +241,11 @@ def record_checkin(
     двух одновременных нажатий закрывает UNIQUE на `checkin.reminder_id`,
     а `IntegrityError` здесь — ожидаемый исход, а не ошибка.
     """
-    reminder = session.get(Reminder, reminder_id)
+    reminder = session.scalar(
+        select(Reminder)
+        .join(Workout, Reminder.workout_id == Workout.id)
+        .where(Reminder.id == reminder_id, Workout.user_id == _owner(user_id))
+    )
     if reminder is None:
         return None
 
@@ -230,7 +271,9 @@ def _find_checkin(session: Session, reminder_id: int) -> Checkin | None:
     return session.scalar(select(Checkin).where(Checkin.reminder_id == reminder_id))
 
 
-def recent_history(session: Session, limit: int = 5) -> list[HistoryEntry]:
+def recent_history(
+    session: Session, limit: int = 5, user_id: int | None = None
+) -> list[HistoryEntry]:
     """Последние записи журнала: отвеченные и «без ответа» (R-13).
 
     `pending` и `sent` не попадают: это ещё не результат, показывать нечего.
@@ -244,7 +287,8 @@ def recent_history(session: Session, limit: int = 5) -> list[HistoryEntry]:
         .where(
             Reminder.status.in_(
                 (ReminderStatus.ANSWERED.value, ReminderStatus.MISSED.value)
-            )
+            ),
+            Workout.user_id == _owner(user_id),
         )
         .order_by(Reminder.scheduled_at.desc(), Reminder.id.desc())
         .limit(limit)
@@ -276,7 +320,9 @@ def _set_reminder_status(
     session.commit()
 
 
-def active_schedule_rows(session: Session) -> list[tuple[int, int, str]]:
+def active_schedule_rows(
+    session: Session, user_id: int | None = None
+) -> list[tuple[int, int, str]]:
     """Строки расписания, которые ещё действуют: `(workout_id, weekday, "HH:MM")`.
 
     Фильтр по `is_active` на двух таблицах сразу: отключённая тренировка не
@@ -286,31 +332,42 @@ def active_schedule_rows(session: Session) -> list[tuple[int, int, str]]:
     rows = session.execute(
         select(Schedule.workout_id, Schedule.weekday, Schedule.time_of_day)
         .join(Workout, Schedule.workout_id == Workout.id)
-        .where(Schedule.is_active.is_(True), Workout.is_active.is_(True))
+        .where(
+            Schedule.is_active.is_(True),
+            Workout.is_active.is_(True),
+            Workout.user_id == _owner(user_id),
+        )
         .order_by(Schedule.workout_id, Schedule.weekday, Schedule.time_of_day)
     ).all()
     return [(row.workout_id, row.weekday, row.time_of_day) for row in rows]
 
 
-def active_once_rows(session: Session) -> list[tuple[int, date, str]]:
+def active_once_rows(
+    session: Session, user_id: int | None = None
+) -> list[tuple[int, date, str]]:
     """Разовые тренировки для тика: `(workout_id, дата, "HH:MM")` (R-35)."""
     rows = session.execute(
         select(Workout.id, Workout.date_once, Workout.time_once).where(
             Workout.is_active.is_(True),
             Workout.date_once.is_not(None),
             Workout.time_once.is_not(None),
+            Workout.user_id == _owner(user_id),
         )
     )
     return [(row.id, row.date_once, row.time_once) for row in rows]
 
 
-def workouts_for_day(session: Session, day: date) -> list[WorkoutView]:
+def workouts_for_day(
+    session: Session, day: date, user_id: int | None = None
+) -> list[WorkoutView]:
     """Тренировки на календарный день: недельные + разовая на эту дату (R-35)."""
-    weekly = workouts_for_weekday(session, Weekday(day.weekday()))
+    uid = _owner(user_id)
+    weekly = workouts_for_weekday(session, Weekday(day.weekday()), uid)
     once = session.scalars(
         select(Workout).where(
             Workout.is_active.is_(True),
             Workout.date_once == day,
+            Workout.user_id == uid,
         )
     ).all()
     # Порядок — по id, как у всех списков: план не должен зависеть от того,
@@ -320,7 +377,9 @@ def workouts_for_day(session: Session, day: date) -> list[WorkoutView]:
     return [views[key] for key in sorted(views)]
 
 
-def workouts_for_weekday(session: Session, weekday: Weekday) -> list[WorkoutView]:
+def workouts_for_weekday(
+    session: Session, weekday: Weekday, user_id: int | None = None
+) -> list[WorkoutView]:
     """Активные тренировки, у которых этот день недели есть в расписании.
 
     Чтение для плана (R-24): `distinct` нужен, потому что теоретически у одной
@@ -334,23 +393,29 @@ def workouts_for_weekday(session: Session, weekday: Weekday) -> list[WorkoutView
             Workout.is_active.is_(True),
             Schedule.is_active.is_(True),
             Schedule.weekday == int(weekday),
+            Workout.user_id == _owner(user_id),
         )
         .order_by(Workout.id)
     ).all()
     return [to_view(workout) for workout in workouts]
 
 
-def claim_wellness_prompt(session: Session, day: date, now_utc: datetime) -> bool:
+def claim_wellness_prompt(
+    session: Session, day: date, now_utc: datetime, user_id: int | None = None
+) -> bool:
     """Занять день под вечерний вопрос. `True` — если заняли именно мы (R-19).
 
     Тот же приём, что у `claim_reminder`: проверка «а не отправляли ли» перед
     вставкой оставила бы окно, в которое второй тик влезает и отправляет второй
     вопрос. `ON CONFLICT DO NOTHING` закрывает окно базой.
     """
+    uid = _owner(user_id)
     statement = (
         sqlite_insert(Wellness)
-        .values(day=day.isoformat(), prompted_at=_naive_utc(now_utc))
-        .on_conflict_do_nothing(index_elements=["day"])
+        .values(
+            user_id=uid, day=day.isoformat(), prompted_at=_naive_utc(now_utc)
+        )
+        .on_conflict_do_nothing(index_elements=["user_id", "day"])
         .returning(Wellness.id)
     )
     wellness_id = session.scalar(statement)
@@ -358,13 +423,21 @@ def claim_wellness_prompt(session: Session, day: date, now_utc: datetime) -> boo
     return wellness_id is not None
 
 
-def wellness_for_day(session: Session, day: date) -> WellnessEntry | None:
+def wellness_for_day(
+    session: Session, day: date, user_id: int | None = None
+) -> WellnessEntry | None:
     """Самочувствие за день или `None`, если дня в базе нет."""
-    row = session.scalar(select(Wellness).where(Wellness.day == day.isoformat()))
+    row = session.scalar(
+        select(Wellness).where(
+            Wellness.day == day.isoformat(), Wellness.user_id == _owner(user_id)
+        )
+    )
     return None if row is None else _wellness_entry(row)
 
 
-def release_wellness_prompt(session: Session, day: date) -> bool:
+def release_wellness_prompt(
+    session: Session, day: date, user_id: int | None = None
+) -> bool:
     """Освободить день, если вопрос не удалось отправить.
 
     Удаляем только незаполненную строку: оценку, поставленную другим путём,
@@ -373,6 +446,7 @@ def release_wellness_prompt(session: Session, day: date) -> bool:
     result = session.execute(
         delete(Wellness).where(
             Wellness.day == day.isoformat(),
+            Wellness.user_id == _owner(user_id),
             Wellness.score.is_(None),
         )
     )
@@ -386,6 +460,7 @@ def save_wellness(
     score: int,
     note: str | None,
     now_utc: datetime,
+    user_id: int | None = None,
 ) -> WellnessEntry:
     """Записать оценку за день. Существующая оценка заменяется (R-20, R-21).
 
@@ -396,11 +471,18 @@ def save_wellness(
     `claim_wellness_prompt`).
     """
     moment = _naive_utc(now_utc)
+    uid = _owner(user_id)
     statement = (
         sqlite_insert(Wellness)
-        .values(day=day.isoformat(), score=score, note=note, answered_at=moment)
+        .values(
+            user_id=uid,
+            day=day.isoformat(),
+            score=score,
+            note=note,
+            answered_at=moment,
+        )
         .on_conflict_do_update(
-            index_elements=["day"],
+            index_elements=["user_id", "day"],
             set_={
                 "score": score,
                 "answered_at": moment,
@@ -412,7 +494,11 @@ def save_wellness(
     session.execute(statement)
     session.commit()
 
-    row = session.scalar(select(Wellness).where(Wellness.day == day.isoformat()))
+    row = session.scalar(
+        select(Wellness).where(
+            Wellness.day == day.isoformat(), Wellness.user_id == uid
+        )
+    )
     if row is None:  # pragma: no cover — вставка выше только что создала строку
         raise RuntimeError(f"строка самочувствия за {day} не создалась")
     return _wellness_entry(row)
@@ -428,6 +514,7 @@ def _wellness_entry(row: Wellness) -> WellnessEntry:
 
 def cleanup_old_reminders(
     session: Session,
+    user_id: int | None = None,
     *,
     sent_before: datetime,
     pending_before: datetime,
@@ -441,12 +528,15 @@ def cleanup_old_reminders(
 
     `answered` не трогается никогда: отметка пользователя важнее времени.
     """
+    # Владелец фильтруется подзапросом: у напоминания его нет, он у тренировки.
+    own = select(Workout.id).where(Workout.user_id == _owner(user_id))
     sent_stale = session.execute(
         update(Reminder)
         .where(
             Reminder.status == ReminderStatus.SENT.value,
             Reminder.sent_at.is_not(None),
             Reminder.sent_at < _naive_utc(sent_before),
+            Reminder.workout_id.in_(own),
         )
         .values(status=ReminderStatus.MISSED.value)
     )
@@ -455,6 +545,7 @@ def cleanup_old_reminders(
         .where(
             Reminder.status == ReminderStatus.PENDING.value,
             Reminder.created_at < _naive_utc(pending_before),
+            Reminder.workout_id.in_(own),
         )
         .values(status=ReminderStatus.MISSED.value)
     )
@@ -495,7 +586,9 @@ def to_view(workout: Workout) -> WorkoutView:
     )
 
 
-def save_plan_snapshot(session: Session, plan_date: date, plan: DayPlan) -> None:
+def save_plan_snapshot(
+    session: Session, plan_date: date, plan: DayPlan, user_id: int | None = None
+) -> None:
     """Сохранить показанный план на дату (R-36).
 
     Один снимок на дату: старый удаляется целиком (элементы — каскадом), новый
@@ -504,16 +597,21 @@ def save_plan_snapshot(session: Session, plan_date: date, plan: DayPlan) -> None
     # Upsert, а не «select → delete → insert»: два одновременных показа плана
     # (двойной тап, будущий concurrent_updates) иначе дали бы IntegrityError на
     # UNIQUE(plan_date). Остальной репозиторий держится того же приёма.
+    uid = _owner(user_id)
     session.execute(
         sqlite_insert(PlanSnapshot)
-        .values(plan_date=plan_date, score=plan.score, is_rest=plan.is_rest)
+        .values(
+            user_id=uid, plan_date=plan_date, score=plan.score, is_rest=plan.is_rest
+        )
         .on_conflict_do_update(
-            index_elements=["plan_date"],
+            index_elements=["user_id", "plan_date"],
             set_={"score": plan.score, "is_rest": plan.is_rest},
         )
     )
     snapshot = session.scalar(
-        select(PlanSnapshot).where(PlanSnapshot.plan_date == plan_date)
+        select(PlanSnapshot).where(
+            PlanSnapshot.plan_date == plan_date, PlanSnapshot.user_id == uid
+        )
     )
     if snapshot is None:  # pragma: no cover — upsert только что её создал
         raise RuntimeError("снимок плана не найден после upsert")
@@ -538,12 +636,15 @@ def save_plan_snapshot(session: Session, plan_date: date, plan: DayPlan) -> None
 
 
 def week_snapshots(
-    session: Session, start_day: date, end_day: date
+    session: Session, start_day: date, end_day: date, user_id: int | None = None
 ) -> list[PlanSnapshotView]:
     """Снимки планов за диапазон дат в удобном для разбора виде (R-37)."""
     rows = session.scalars(
         select(PlanSnapshot)
-        .where(PlanSnapshot.plan_date.between(start_day, end_day))
+        .where(
+            PlanSnapshot.plan_date.between(start_day, end_day),
+            PlanSnapshot.user_id == _owner(user_id),
+        )
         .order_by(PlanSnapshot.plan_date)
     ).all()
     return [
@@ -566,7 +667,7 @@ def week_snapshots(
 
 
 def week_reminders(
-    session: Session, start_utc: datetime, end_utc: datetime
+    session: Session, start_utc: datetime, end_utc: datetime, user_id: int | None = None
 ) -> list[WeekReminder]:
     """Напоминания за интервал (UTC) вместе с отметками — для разбора недели."""
     rows = session.execute(
@@ -575,6 +676,7 @@ def week_reminders(
         .outerjoin(Checkin, Checkin.reminder_id == Reminder.id)
         .where(Reminder.scheduled_at >= _naive_utc(start_utc))
         .where(Reminder.scheduled_at < _naive_utc(end_utc))
+        .where(Workout.user_id == _owner(user_id))
     )
     return [
         WeekReminder(
@@ -588,13 +690,14 @@ def week_reminders(
 
 
 def wellness_range(
-    session: Session, start_day: date, end_day: date
+    session: Session, start_day: date, end_day: date, user_id: int | None = None
 ) -> list[WellnessEntry]:
     """Самочувствие за диапазон календарных дней (R-37)."""
     rows = session.scalars(
         select(Wellness)
         .where(Wellness.day >= start_day.isoformat())
         .where(Wellness.day <= end_day.isoformat())
+        .where(Wellness.user_id == _owner(user_id))
         .order_by(Wellness.day)
     )
     return [_wellness_entry(row) for row in rows]
@@ -611,6 +714,7 @@ def claim_weekly_report(
     week_start: date,
     now_utc: datetime,
     stale_after: timedelta = WEEKLY_REPORT_STUCK_WINDOW,
+    user_id: int | None = None,
 ) -> bool:
     """Взять право на разбор недели. `False` — отправлен или уже в работе (R-40).
 
@@ -618,10 +722,13 @@ def claim_weekly_report(
     отправлено; `sent_at` пуст и `claimed_at` свежий — кто-то уже пытается;
     `sent_at` пуст, но claim протух — процесс умер, право перехватывается.
     """
+    uid = _owner(user_id)
     result = session.execute(
         sqlite_insert(WeeklyReport)
-        .values(week_start=week_start, claimed_at=_naive_utc(now_utc))
-        .on_conflict_do_nothing(index_elements=["week_start"])
+        .values(
+            user_id=uid, week_start=week_start, claimed_at=_naive_utc(now_utc)
+        )
+        .on_conflict_do_nothing(index_elements=["user_id", "week_start"])
     )
     session.commit()
     if result.rowcount == 1:
@@ -635,6 +742,7 @@ def claim_weekly_report(
         update(WeeklyReport)
         .where(
             WeeklyReport.week_start == week_start,
+            WeeklyReport.user_id == uid,
             WeeklyReport.sent_at.is_(None),
             or_(
                 WeeklyReport.claimed_at.is_(None),
@@ -648,22 +756,28 @@ def claim_weekly_report(
 
 
 def mark_weekly_report_sent(
-    session: Session, week_start: date, now_utc: datetime
+    session: Session, week_start: date, now_utc: datetime, user_id: int | None = None
 ) -> None:
     """Отметить доставку: с этого момента claim не перехватывается (R-40)."""
     session.execute(
         update(WeeklyReport)
-        .where(WeeklyReport.week_start == week_start)
+        .where(
+            WeeklyReport.week_start == week_start,
+            WeeklyReport.user_id == _owner(user_id),
+        )
         .values(sent_at=_naive_utc(now_utc))
     )
     session.commit()
 
 
-def release_weekly_report(session: Session, week_start: date) -> bool:
+def release_weekly_report(
+    session: Session, week_start: date, user_id: int | None = None
+) -> bool:
     """Вернуть право, если отправка сорвалась; отправленное не трогаем (R-40)."""
     result = session.execute(
         delete(WeeklyReport).where(
             WeeklyReport.week_start == week_start,
+            WeeklyReport.user_id == _owner(user_id),
             WeeklyReport.sent_at.is_(None),
         )
     )

@@ -21,7 +21,7 @@ class PendingChoice:
     """Запомненное намерение, ждущее выбора владельца."""
 
     id: str
-    chat_id: int
+    user_id: int
     intent: AssistantIntent
     created_at: float
 
@@ -47,22 +47,30 @@ class PendingChoices:
         self._items: dict[str, PendingChoice] = {}
         self._done: dict[str, float] = {}
 
-    def put(self, chat_id: int, intent: AssistantIntent) -> PendingChoice:
+    def put(self, user_id: int, intent: AssistantIntent) -> PendingChoice:
         self._prune()
         choice = PendingChoice(
             id=uuid4().hex[:8],
-            chat_id=chat_id,
+            user_id=user_id,
             intent=intent,
             created_at=self._clock(),
         )
         self._items[choice.id] = choice
         return choice
 
-    def take(self, pending_id: str) -> tuple[PendingChoice | None, ChoiceStatus]:
-        """Забрать уточнение. Повторный клик по созданной — `DONE`."""
+    def take(
+        self, pending_id: str, user_id: int | None = None
+    ) -> tuple[PendingChoice | None, ChoiceStatus]:
+        """Забрать уточнение. Чужое не изымается: для него оно не существует.
+
+        Повторный клик по созданной — `DONE`.
+        """
         self._prune()
-        choice = self._items.pop(pending_id, None)
+        choice = self._items.get(pending_id)
         if choice is not None:
+            if user_id is not None and choice.user_id != user_id:
+                return None, ChoiceStatus.MISSING
+            del self._items[pending_id]
             return choice, ChoiceStatus.PENDING
         if pending_id in self._done:
             return None, ChoiceStatus.DONE

@@ -13,10 +13,33 @@ from src.core.reminders import ReminderStatus
 from src.db.base import Base
 
 
+class User(Base):
+    """Учётная запись (R-41): чьи тренировки, самочувствие и планы.
+
+    Настройки живут здесь, а не в конфиге: второй человек может быть в другой
+    таймзоне и спрашивать самочувствие в другое время.
+    """
+
+    __tablename__ = "user"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(unique=True)
+    tz: Mapped[str] = mapped_column(String(64))
+    wellness_time: Mapped[str] = mapped_column(String(5))
+    week_review_time: Mapped[str] = mapped_column(String(5))
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
 class Workout(Base):
     __tablename__ = "workout"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Владелец (R-42). `schedule`/`reminder`/`checkin` наследуют его через
+    # join: дублирование поля завело бы вторую правду.
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # Свободный тип (R-33): «бег», «интервальный бег»; 32 — верхняя граница.
     workout_type: Mapped[str] = mapped_column(String(32))
     duration_min: Mapped[int]
@@ -111,11 +134,15 @@ class Wellness(Base):
     """
 
     __tablename__ = "wellness"
+    __table_args__ = (UniqueConstraint("user_id", "day", name="uq_wellness_user_day"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # Локальная дата 'YYYY-MM-DD', а не момент: «самочувствие за 26-е» — это
     # день пользователя, и переход на летнее время не должен его менять.
-    day: Mapped[str] = mapped_column(String(10), unique=True)
+    day: Mapped[str] = mapped_column(String(10))
     score: Mapped[int | None] = mapped_column(default=None)
     note: Mapped[str | None] = mapped_column(String(500), default=None)
     prompted_at: Mapped[datetime | None] = mapped_column(
@@ -135,9 +162,13 @@ class PlanSnapshot(Base):
     """
 
     __tablename__ = "plan_snapshot"
+    __table_args__ = (UniqueConstraint("user_id", "plan_date", name="uq_snapshot_user_day"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plan_date: Mapped[date] = mapped_column(Date, unique=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    plan_date: Mapped[date] = mapped_column(Date)
     score: Mapped[int]
     is_rest: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
@@ -179,9 +210,13 @@ class WeeklyReport(Base):
     """
 
     __tablename__ = "weekly_report"
+    __table_args__ = (UniqueConstraint("user_id", "week_start", name="uq_report_user_week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    week_start: Mapped[date] = mapped_column(Date, unique=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    week_start: Mapped[date] = mapped_column(Date)
     # claim — право попробовать; sent_at заполняется только после доставки.
     # Если процесс умер между ними, claim считается протухшим и перехватывается
     # повторно — иначе неделя терялась бы молча.

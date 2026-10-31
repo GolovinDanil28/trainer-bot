@@ -16,6 +16,7 @@ from src.bot.wellness_service import WellnessService
 from src.core.choice import build_type_choice_callback
 from src.core.help import is_help_request
 from src.core.messages import format_help, format_start
+from src.db.context import current_user_id
 
 
 def _service(context: ContextTypes.DEFAULT_TYPE) -> WorkoutService:
@@ -116,7 +117,7 @@ async def on_free_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # «или» во фразе: тип выбирает владелец кнопкой, а намерение ждёт в памяти
     # bot-слоя (R-34). В БД до выбора ничего не пишется.
     pending: PendingChoices = context.bot_data["pending_choices"]
-    choice = pending.put(message.chat_id, turn.intent)
+    choice = pending.put(current_user_id(), turn.intent)
     keyboard = InlineKeyboardMarkup(
         [
             [
