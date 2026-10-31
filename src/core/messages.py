@@ -17,6 +17,9 @@ from src.core.plan import (
     REDUCTION_PERCENT,
     REST_MAX_SCORE,
     DayPlan,
+    MissReason,
+    ScheduleAdvice,
+    WeeklyReview,
 )
 from src.core.reminders import CHECKIN_STATUS_LABELS, CheckinStatus, ReminderMessage
 from src.core.schedule import (
@@ -176,7 +179,7 @@ HELP_LIMITS = (
     "— разовые переносы («завтра не смогу»);\n"
     "— замену одной тренировки другой;\n"
     "— несколько действий в одной фразе;\n"
-    "— недельный разбор и план на следующую неделю."
+    "— составление плана на следующую неделю."
 )
 
 
@@ -311,3 +314,120 @@ def format_date_unclear(raw: str) -> str:
         f"Не понял дату «{raw}». Назови «сегодня», «завтра» или «28.10» — "
         "и не раньше сегодняшнего дня."
     )
+
+
+# --- недельный разбор (R-37, R-38) ---------------------------------------
+
+
+MISS_REASON_LABELS: dict[MissReason, str] = {
+    MissReason.SKIPPED: "пропустил",
+    MissReason.MISSED: "не ответил до конца дня",
+    MissReason.NO_ANSWER: "без отметки",
+    MissReason.NO_REMINDER: "напоминания не было",
+}
+
+ADVICE_TEXTS: dict[ScheduleAdvice, str] = {
+    ScheduleAdvice.ADD_WORKOUT: (
+        "Всё, что советовал план, сделано. Предложение: добавить одну тренировку "
+        "на следующую неделю."
+    ),
+    ScheduleAdvice.REDUCE_OR_MORNING: (
+        "Пропусков два и больше при низком самочувствии. Предложение: сократить "
+        "число тренировок или перенести их на утро."
+    ),
+    ScheduleAdvice.REDUCE: (
+        "Пропущено больше половины плана. Предложение: убрать одну тренировку, "
+        "чтобы неделя стала выполнимой."
+    ),
+    ScheduleAdvice.NONE: (
+        "Расписание менять не нужно: эта неделя не даёт повода."
+    ),
+}
+
+WEEK_SCHEDULE_FOOTER = (
+    "Расписание я не меняю. Если решишь — /off и /new."
+)
+
+
+def plural_workouts(count: int) -> str:
+    """Родительный падеж после «из»: «из 1 тренировки», «из 2 тренировок»."""
+    if count % 10 == 1 and count % 100 != 11:
+        return "тренировки"
+    return "тренировок"
+
+
+def plural_days(count: int) -> str:
+    """«1 день», «2 дня», «5 дней» — для строки про отдых."""
+    if count % 10 == 1 and count % 100 != 11:
+        return "день"
+    if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14:
+        return "дня"
+    return "дней"
+
+
+def format_week_range(review: WeeklyReview) -> str:
+    return f"{review.week_start:%d.%m}–{review.week_end:%d.%m}"
+
+
+def format_weekly_review(review: WeeklyReview) -> str:
+    """Итог недели, причины пропусков и предложение (R-37, R-38)."""
+    header = f"Разбор недели {format_week_range(review)}"
+
+    if not review.has_snapshots:
+        return (
+            f"{header}\n"
+            "Планов за эту неделю нет: я показываю план после вечернего вопроса, "
+            "а ответов не было. Сравнивать нечего."
+        )
+
+    if review.total == 0:
+        # Отдых и «в плане не было тренировок» — разные факты: во втором случае
+        # бот ничего не советовал, и говорить про отдых нельзя.
+        if review.rest_days:
+            lines = [
+                header,
+                f"Бот советовал отдых "
+                f"{review.rest_days} {plural_days(review.rest_days)}.",
+                "",
+                ADVICE_TEXTS[review.advice],
+                WEEK_SCHEDULE_FOOTER,
+            ]
+        else:
+            lines = [
+                header,
+                "Планов с тренировками не было: в расписании на эти дни "
+                "ничего не стояло.",
+                "",
+                ADVICE_TEXTS[review.advice],
+                WEEK_SCHEDULE_FOOTER,
+            ]
+        return "\n".join(lines)
+
+    lines = [
+        header,
+        f"Сделано {review.done} из {review.total} {plural_workouts(review.total)}.",
+    ]
+    if review.rest_days:
+        lines.append(
+            f"Бот советовал отдых {review.rest_days} "
+            f"{plural_days(review.rest_days)}."
+        )
+
+    lines.extend(["", "Что мешало:"])
+    if not review.misses:
+        lines.append("— пропусков нет, всё по плану.")
+    else:
+        for miss in review.misses:
+            day = f"{WEEKDAY_SHORT[Weekday(miss.day.weekday())].lower()} {miss.day:%d.%m}"
+            line = (
+                f"— {day}: {workout_label(miss.workout_type)} — "
+                f"{MISS_REASON_LABELS[miss.reason]}"
+            )
+            if miss.score is not None:
+                line += f"; самочувствие {miss.score}/5"
+                if miss.note:
+                    line += f" «{miss.note}»"
+            lines.append(line)
+
+    lines.extend(["", ADVICE_TEXTS[review.advice], WEEK_SCHEDULE_FOOTER])
+    return "\n".join(lines)

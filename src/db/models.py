@@ -125,3 +125,46 @@ class Wellness(Base):
         DateTime(timezone=True), default=None
     )
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
+class PlanSnapshot(Base):
+    """Что бот советовал на конкретную дату (R-36).
+
+    Один снимок на дату: план детерминирован от (расписание, оценка), поэтому
+    повторный показ — это новый ответ на тот же вопрос, а не второе мнение.
+    """
+
+    __tablename__ = "plan_snapshot"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_date: Mapped[date] = mapped_column(Date, unique=True)
+    score: Mapped[int]
+    is_rest: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+    items: Mapped[list[PlanSnapshotItem]] = relationship(
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="PlanSnapshotItem.id",
+    )
+
+
+class PlanSnapshotItem(Base):
+    """Элемент снимка плана: что именно было предложено."""
+
+    __tablename__ = "plan_item"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("plan_snapshot.id", ondelete="CASCADE")
+    )
+    workout_type: Mapped[str] = mapped_column(String(32))
+    time_of_day: Mapped[str] = mapped_column(String(5))
+    duration_min: Mapped[int]
+    # Тренировку могли отключить после показа: снимок обязан пережить это.
+    workout_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workout.id", ondelete="SET NULL"), default=None
+    )
+
+    snapshot: Mapped[PlanSnapshot] = relationship(back_populates="items")

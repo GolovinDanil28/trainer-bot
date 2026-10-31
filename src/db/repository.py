@@ -14,6 +14,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.core.history import HistoryEntry
+from src.core.plan import (
+    DayPlan,
+    PlanSnapshotView,
+    SnapshotItem,
+    WeekReminder,
+)
 from src.core.reminders import (
     CHECKIN_STATUS,
     CheckinAction,
@@ -23,7 +29,15 @@ from src.core.reminders import (
 )
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutView
 from src.core.wellness import WellnessEntry
-from src.db.models import Checkin, Reminder, Schedule, Wellness, Workout
+from src.db.models import (
+    Checkin,
+    PlanSnapshot,
+    PlanSnapshotItem,
+    Reminder,
+    Schedule,
+    Wellness,
+    Workout,
+)
 
 
 def create_workout(session: Session, draft: WorkoutDraft) -> WorkoutView:
@@ -477,3 +491,108 @@ def to_view(workout: Workout) -> WorkoutView:
         date_once=workout.date_once,
         time_once=time.fromisoformat(workout.time_once) if workout.time_once else None,
     )
+
+
+def save_plan_snapshot(session: Session, plan_date: date, plan: DayPlan) -> None:
+    """Сохранить показанный план на дату (R-36).
+
+    Один снимок на дату: старый удаляется целиком (элементы — каскадом), новый
+    пишется на его место. Так повторный показ заменяет, а не раздваивает.
+    """
+    # Upsert, а не «select → delete → insert»: два одновременных показа плана
+    # (двойной тап, будущий concurrent_updates) иначе дали бы IntegrityError на
+    # UNIQUE(plan_date). Остальной репозиторий держится того же приёма.
+    session.execute(
+        sqlite_insert(PlanSnapshot)
+        .values(plan_date=plan_date, score=plan.score, is_rest=plan.is_rest)
+        .on_conflict_do_update(
+            index_elements=["plan_date"],
+            set_={"score": plan.score, "is_rest": plan.is_rest},
+        )
+    )
+    snapshot = session.scalar(
+        select(PlanSnapshot).where(PlanSnapshot.plan_date == plan_date)
+    )
+    if snapshot is None:  # pragma: no cover — upsert только что её создал
+        raise RuntimeError("снимок плана не найден после upsert")
+    session.execute(
+        delete(PlanSnapshotItem).where(
+            PlanSnapshotItem.snapshot_id == snapshot.id
+        )
+    )
+    session.add_all(
+        [
+            PlanSnapshotItem(
+                snapshot_id=snapshot.id,
+                workout_type=str(item.workout_type),
+                time_of_day=item.time_of_day.strftime("%H:%M"),
+                duration_min=item.duration_min,
+                workout_id=item.workout_id,
+            )
+            for item in plan.items
+        ]
+    )
+    session.commit()
+
+
+def week_snapshots(
+    session: Session, start_day: date, end_day: date
+) -> list[PlanSnapshotView]:
+    """Снимки планов за диапазон дат в удобном для разбора виде (R-37)."""
+    rows = session.scalars(
+        select(PlanSnapshot)
+        .where(PlanSnapshot.plan_date.between(start_day, end_day))
+        .order_by(PlanSnapshot.plan_date)
+    ).all()
+    return [
+        PlanSnapshotView(
+            plan_date=row.plan_date,
+            score=row.score,
+            is_rest=row.is_rest,
+            items=tuple(
+                SnapshotItem(
+                    workout_type=item.workout_type,
+                    time_of_day=time.fromisoformat(item.time_of_day),
+                    duration_min=item.duration_min,
+                    workout_id=item.workout_id,
+                )
+                for item in row.items
+            ),
+        )
+        for row in rows
+    ]
+
+
+def week_reminders(
+    session: Session, start_utc: datetime, end_utc: datetime
+) -> list[WeekReminder]:
+    """Напоминания за интервал (UTC) вместе с отметками — для разбора недели."""
+    rows = session.execute(
+        select(Reminder, Workout, Checkin)
+        .join(Workout, Reminder.workout_id == Workout.id)
+        .outerjoin(Checkin, Checkin.reminder_id == Reminder.id)
+        .where(Reminder.scheduled_at >= _naive_utc(start_utc))
+        .where(Reminder.scheduled_at < _naive_utc(end_utc))
+    )
+    return [
+        WeekReminder(
+            workout_id=reminder.workout_id,
+            scheduled_at_utc=_as_utc(reminder.scheduled_at),
+            status=reminder.status,
+            checkin=checkin.status if checkin is not None else None,
+        )
+        for reminder, _workout, checkin in rows
+    ]
+
+
+def wellness_range(
+    session: Session, start_day: date, end_day: date
+) -> list[WellnessEntry]:
+    """Самочувствие за диапазон календарных дней (R-37)."""
+    rows = session.scalars(
+        select(Wellness)
+        .where(Wellness.day >= start_day.isoformat())
+        .where(Wellness.day <= end_day.isoformat())
+        .order_by(Wellness.day)
+    )
+    return [_wellness_entry(row) for row in rows]
