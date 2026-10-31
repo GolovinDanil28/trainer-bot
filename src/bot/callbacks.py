@@ -9,7 +9,7 @@ from datetime import time
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.bot.access import REFUSAL_TEXT, is_owner
+from src.bot.access import REFUSAL_TEXT, resolve_user_id
 from src.bot.pending import ChoiceStatus, PendingChoices
 from src.bot.service import WorkoutService
 from src.bot.wellness_service import WellnessService
@@ -17,6 +17,7 @@ from src.core.choice import parse_type_choice_callback
 from src.core.messages import CHOICE_DONE_TEXT, CHOICE_EXPIRED_TEXT
 from src.core.reminders import CallbackError, parse_checkin_callback
 from src.core.wellness import parse_wellness_callback
+from src.db.context import acting_as
 
 # Вариантов «или» максимум 4 (R-34); индекс 0..3 — всё остальное подделка.
 _MAX_OPTIONS_INDEX = 3
@@ -27,7 +28,8 @@ async def on_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if query is None:
         return
 
-    if not is_owner(update, context):
+    user_id = resolve_user_id(update, context)
+    if user_id is None:
         # Чужому не объясняем, почему нельзя: сам факт живого бота — лишняя
         # информация. Ответ пустой, как и у невалидной кнопки.
         await query.answer()
@@ -41,7 +43,8 @@ async def on_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     service: WorkoutService = context.bot_data["workout_service"]
-    text = service.record_checkin(reminder_id, action)
+    with acting_as(user_id):
+        text = service.record_checkin(reminder_id, action)
 
     # Текст — всплывающим ответом, а клавиатуру снимаем: отметка уже сделана,
     # и повторное нажатие всё равно вернёт «уже отмечено».
@@ -55,7 +58,8 @@ async def on_wellness(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if query is None:
         return
 
-    if not is_owner(update, context):
+    user_id = resolve_user_id(update, context)
+    if user_id is None:
         # Как и у отметок: чужому не объясняем, почему нельзя.
         await query.answer()
         return
@@ -67,7 +71,8 @@ async def on_wellness(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     service: WellnessService = context.bot_data["wellness_service"]
-    result = service.record_from_button(day, score)
+    with acting_as(user_id):
+        result = service.record_from_button(day, score)
 
     if not result.accepted:
         # Вопрос другого дня: отвечаем всплывающим текстом и снимаем клавиатуру,
@@ -89,7 +94,8 @@ async def on_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if query is None:
         return
 
-    if not is_owner(update, context):
+    user_id = resolve_user_id(update, context)
+    if user_id is None:
         # Отказ тот же, что у свободного текста (R-18): один класс правил доступа.
         await query.answer(REFUSAL_TEXT)
         return
@@ -107,7 +113,7 @@ async def on_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     pending: PendingChoices = context.bot_data["pending_choices"]
-    choice, status = pending.take(pending_id)
+    choice, status = pending.take(pending_id, user_id)
 
     if status is ChoiceStatus.DONE:
         await query.answer(CHOICE_DONE_TEXT)
@@ -125,24 +131,29 @@ async def on_type_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     moment = time.fromisoformat(choice.intent.time or "00:00")
     service: WorkoutService = context.bot_data["workout_service"]
-    if choice.intent.date_raw is not None:
-        # «или» + дата: тип выбирается кнопкой, дата остаётся из фразы (R-34).
-        text = service.create_once(
-            choice.intent.date_raw,
-            options[index],
-            moment,
-            choice.intent.distance_km,
-            choice.intent.duration_min,
-        )
-    else:
-        text = service.create_weekly(
-            options[index],
-            tuple(choice.intent.days or ()),
-            moment,
-            choice.intent.distance_km,
-            choice.intent.duration_min,
-        )
     pending.mark_done(pending_id)
+    with acting_as(user_id):
+        # «или» + дата: тип выбирается кнопкой, дата остаётся из фразы (R-34).
+        text = _create_from_choice(service, choice, options[index], moment)
 
     await query.answer()
     await query.edit_message_text(text, reply_markup=None)
+
+
+def _create_from_choice(service, choice, option, moment) -> str:  # noqa: ANN001
+    """Создать тренировку из уточнения: дата или недельные дни (R-34)."""
+    if choice.intent.date_raw is not None:
+        return service.create_once(
+            choice.intent.date_raw,
+            option,
+            moment,
+            choice.intent.distance_km,
+            choice.intent.duration_min,
+        )
+    return service.create_weekly(
+        option,
+        tuple(choice.intent.days or ()),
+        moment,
+        choice.intent.distance_km,
+        choice.intent.duration_min,
+    )

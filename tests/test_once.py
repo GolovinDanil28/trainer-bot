@@ -20,6 +20,7 @@ from src.core.schedule import (
 )
 from src.core.wellness import WellnessScore
 from src.db import repository
+from src.db.context import DEFAULT_USER_ID
 from src.db.models import Reminder, Schedule, Workout
 from src.scheduler.tick import SchedulerTick
 from tests.fakes import FakeLLM, FakeSender
@@ -289,7 +290,7 @@ async def test_choice_button_keeps_date_from_phrase(service, session_factory):
     )
 
     turn = await assistant.handle_turn(phrase)
-    choice = pending.put(42, turn.intent)
+    choice = pending.put(DEFAULT_USER_ID, turn.intent)
     click = make_callback_update(build_type_choice_callback(choice.id, 0))
 
     await on_type_choice(click, context)

@@ -65,7 +65,13 @@ class Runtime:
 def build_runtime(settings: Settings) -> Runtime:
     """Открыть базу и создать таблицы. Повторный запуск безопасен."""
     engine = create_db_engine(settings.db_url)
-    init_db(engine)
+    init_db(
+        engine,
+        settings.owner_id,
+        tz=settings.tz,
+        wellness_time=settings.wellness_time,
+        week_review_time=settings.week_review_time,
+    )
     session_factory = make_session_factory(engine)
     return Runtime(
         engine=engine,
@@ -161,6 +167,7 @@ def build_application(settings: Settings, runtime: Runtime | None = None) -> App
     application = (
         Application.builder().token(settings.bot_token.get_secret_value()).build()
     )
+    application.bot_data["session_factory"] = runtime.session_factory
     application.bot_data["workout_service"] = runtime.service
     application.bot_data["wellness_service"] = runtime.wellness
     # Уточнения типа живут в памяти процесса и стареют сами (R-34).

@@ -9,7 +9,6 @@ from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from src.core.reminders import CallbackError
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutType
@@ -139,7 +138,7 @@ def test_row_without_score_is_saved(session_factory):
     # Состояние «вопрос отправлен, ответа нет» обязано существовать: на нём
     # держится идемпотентность вечернего вопроса (R-19).
     with session_factory() as session:
-        session.add(Wellness(day=DAY.isoformat()))
+        session.add(Wellness(user_id=1, day=DAY.isoformat()))
         session.commit()
 
         row = session.scalar(select(Wellness))
@@ -148,16 +147,29 @@ def test_row_without_score_is_saved(session_factory):
     assert row.score is None
 
 
-def test_day_is_unique(session_factory):
+def test_day_is_unique_per_user(session_factory):
+    """R-19/R-42: уникальность — пара (пользователь, день), не день сам по себе."""
+    from sqlalchemy.exc import IntegrityError
+
     with session_factory() as session:
-        session.add(Wellness(day=DAY.isoformat()))
+        session.add(Wellness(user_id=1, day=DAY.isoformat(), score=4))
         session.commit()
 
-    with pytest.raises(IntegrityError):
-        with session_factory() as session:
-            session.add(Wellness(day=DAY.isoformat()))
-            session.commit()
+    # Та же пара — ограничение сработает.
+    with session_factory() as session, pytest.raises(IntegrityError):
+        session.add(Wellness(user_id=1, day=DAY.isoformat(), score=2))
+        session.commit()
 
+    # Другой пользователь за тот же день — можно.
+    from src.db.models import User
+
+    with session_factory() as session:
+        session.add(
+            User(id=2, telegram_id=555, tz="UTC", wellness_time="21:00",
+                 week_review_time="20:00")
+        )
+        session.add(Wellness(user_id=2, day=DAY.isoformat(), score=2))
+        session.commit()
 
 def test_claim_prompt_succeeds_once(session_factory):
     with session_factory() as session:
