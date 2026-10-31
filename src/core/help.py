@@ -29,18 +29,22 @@ class CommandHelp:
 COMMANDS: tuple[CommandHelp, ...] = (
     CommandHelp("/start", "приветствие и эта справка", "/start"),
     CommandHelp("/help", "эта справка", "/help"),
-    CommandHelp("/new", "создать тренировку", "/new strength Пн,Ср,Пт 19:30"),
+    CommandHelp("/new", "создать тренировку", "/new силовая Пн,Ср,Пт 19:30"),
     CommandHelp("/list", "показать расписание", "/list"),
     CommandHelp("/off", "отключить тренировку", "/off 2"),
     CommandHelp("/history", "последние отметки", "/history"),
     CommandHelp("/wellness", "самочувствие за сегодня", "/wellness 3 не выспался"),
     CommandHelp("/plan", "план на завтра", "/plan"),
-    CommandHelp("/week", "разбор прошедшей недели", "/week"),
+    CommandHelp(
+        "/week",
+        "разбор недели: сколько сделано, что мешало, что менять",
+        "/week",
+    ),
 )
 
 FREE_TEXT_EXAMPLES: tuple[tuple[str, str], ...] = (
-    ("силовая пн ср пт в 19:30", "/new strength Пн,Ср,Пт 19:30"),
-    ("кардио по вторникам и четвергам в восемь утра", "/new cardio Вт,Чт 08:00"),
+    ("силовая пн ср пт в 19:30", "/new силовая Пн,Ср,Пт 19:30"),
+    ("бег по вторникам и четвергам в восемь утра", "/new бег Вт,Чт 08:00"),
     ("покажи расписание", "/list"),
     ("убери вторую тренировку", "/off 2"),
     ("бег 7 км завтра в 19:00", "разовая тренировка на завтра"),

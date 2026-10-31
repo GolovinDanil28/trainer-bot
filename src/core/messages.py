@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 from src.core.help import COMMANDS, FREE_TEXT_EXAMPLES, HELP_TRIGGER_HINT
 from src.core.history import HistoryEntry
 from src.core.plan import (
-    DURATION_STEP_MIN,
     LIGHT_SCORE,
     MIN_DURATION_MIN,
     REDUCTION_PERCENT,
@@ -167,9 +166,9 @@ def format_assistant_unclear() -> str:
 # Правила собираются из констант плана, а не пишутся текстом: иначе изменение
 # правила в `core/plan.py` оставит карточку врать — молча.
 HELP_PLAN_RULES = (
-    f"Правила плана: 1–{REST_MAX_SCORE} — отдых, {LIGHT_SCORE} — "
-    f"{100 - REDUCTION_PERCENT} % длительности "
-    f"(вниз до {DURATION_STEP_MIN} минут, но не меньше {MIN_DURATION_MIN}), "
+    f"Правила плана: оценка 1–{REST_MAX_SCORE} — отдых, "
+    f"{LIGHT_SCORE} — тренировка на {100 - REDUCTION_PERCENT} % "
+    f"(минимум {MIN_DURATION_MIN} минут), "
     f"{LIGHT_SCORE + 1}–5 — как в расписании.\n"
     "План не отменяет напоминание: при отдыхе отметь его «пропустил»."
 )
