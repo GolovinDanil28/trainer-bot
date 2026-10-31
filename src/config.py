@@ -18,6 +18,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _HH_MM_RE = re.compile(r"(?P<hour>\d{1,2}):(?P<minute>\d{2})")
 
 
+def _parse_hh_mm(value: str, var_name: str) -> str:
+    """Проверить ЧЧ:ММ и нормализовать к двум цифрам. Один код на все настройки."""
+    match = _HH_MM_RE.fullmatch(value.strip())
+    if match is None:
+        raise ValueError(
+            f"{var_name} должен быть в формате ЧЧ:ММ, получено '{value}'. "
+            "Пример: 21:00"
+        )
+    hour, minute = int(match["hour"]), int(match["minute"])
+    if hour > 23 or minute > 59:
+        raise ValueError(
+            f"{var_name} вне диапазона 00:00–23:59, получено '{value}'."
+        )
+    # «9:30» и «09:30» — одно и то же время.
+    return f"{hour:02d}:{minute:02d}"
+
+
 class Settings(BaseSettings):
     """Настройки из окружения. Имена полей = имена переменных в нижнем регистре."""
 
@@ -48,6 +65,8 @@ class Settings(BaseSettings):
     # Время вечернего вопроса о самочувствии в таймзоне пользователя.
     # Локальное «21:00», а не UTC-момент: вопрос — свойство дня, а не точки.
     wellness_time: str = "21:00"
+    # Воскресный разбор недели: время по таймзоне владельца (R-40).
+    week_review_time: str = "20:00"
 
     @field_validator("tz")
     @classmethod
@@ -74,22 +93,12 @@ class Settings(BaseSettings):
     @field_validator("wellness_time")
     @classmethod
     def _wellness_time_is_hh_mm(cls, value: str) -> str:
-        match = _HH_MM_RE.fullmatch(value.strip())
-        if match is None:
-            raise ValueError(
-                f"WELLNESS_TIME должен быть в формате ЧЧ:ММ, получено '{value}'. "
-                "Пример: 21:00"
-            )
+        return _parse_hh_mm(value, "WELLNESS_TIME")
 
-        hour, minute = int(match["hour"]), int(match["minute"])
-        if hour > 23 or minute > 59:
-            raise ValueError(
-                f"WELLNESS_TIME вне диапазона 00:00–23:59, получено '{value}'. "
-                "Пример: 21:00"
-            )
-
-        # Нормализуем к двум цифрам: «9:30» и «09:30» — одно и то же время.
-        return f"{hour:02d}:{minute:02d}"
+    @field_validator("week_review_time")
+    @classmethod
+    def _week_review_time_is_hh_mm(cls, value: str) -> str:
+        return _parse_hh_mm(value, "WEEK_REVIEW_TIME")
 
     @property
     def zone(self) -> ZoneInfo:
@@ -100,3 +109,8 @@ class Settings(BaseSettings):
     def wellness_at(self) -> time:
         """Время вечернего вопроса как `time`: формат уже проверен валидатором."""
         return time.fromisoformat(self.wellness_time)
+
+    @property
+    def week_review_at(self) -> time:
+        """Время воскресного разбора как `time`."""
+        return time.fromisoformat(self.week_review_time)

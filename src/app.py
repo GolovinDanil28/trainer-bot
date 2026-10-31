@@ -7,8 +7,10 @@
 from dataclasses import dataclass
 from datetime import timedelta
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from telegram import Bot
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -34,7 +36,11 @@ from src.bot.handlers import (
 )
 from src.bot.pending import PendingChoices
 from src.bot.service import WorkoutService
-from src.bot.telegram_sender import TelegramSender, TelegramWellnessSender
+from src.bot.telegram_sender import (
+    TelegramReportSender,
+    TelegramSender,
+    TelegramWellnessSender,
+)
 from src.bot.wellness_service import WellnessService
 from src.config import Settings
 from src.core.reminders import ReminderSender
@@ -42,6 +48,7 @@ from src.db.session import create_db_engine, init_db, make_session_factory
 from src.llm.ollama import OllamaClient
 from src.scheduler.runner import build_scheduler
 from src.scheduler.tick import SchedulerTick
+from src.scheduler.weekly_tick import WeeklyTick
 from src.scheduler.wellness_tick import WellnessTick
 
 
@@ -92,6 +99,33 @@ def build_wellness_tick(
         sender,
         settings.zone,
         settings.wellness_at,
+    )
+
+
+def build_weekly_tick(
+    runtime: Runtime, sender: TelegramReportSender, settings: Settings
+) -> WeeklyTick:
+    """Тик воскресного разбора: текст берётся у сервиса, доставка — у Telegram."""
+    return WeeklyTick(
+        runtime.session_factory,
+        sender.send_text,
+        settings.zone,
+        settings.week_review_at,
+        render=lambda start, end, until: runtime.wellness.weekly_review_for(
+            start, end, until
+        ),
+    )
+
+
+def build_all_jobs(runtime: Runtime, bot: Bot, settings: Settings) -> AsyncIOScheduler:
+    """Все три job в одном месте: так сборку можно проверить без сети."""
+    sender = TelegramSender(bot, settings.owner_id, settings.zone)
+    wellness_sender = TelegramWellnessSender(bot, settings.owner_id)
+    report_sender = TelegramReportSender(bot, settings.owner_id)
+    return build_scheduler(
+        build_tick(runtime, sender, settings),
+        wellness_tick=build_wellness_tick(runtime, wellness_sender, settings),
+        weekly_tick=build_weekly_tick(runtime, report_sender, settings),
     )
 
 
@@ -150,12 +184,7 @@ def build_application(settings: Settings, runtime: Runtime | None = None) -> App
     async def start_scheduler(app: Application) -> None:
         # Отправители создаются здесь: `Bot` существует только после сборки
         # приложения, а тикам нужен уже готовый транспорт.
-        sender = TelegramSender(app.bot, settings.owner_id, settings.zone)
-        wellness_sender = TelegramWellnessSender(app.bot, settings.owner_id)
-        scheduler = build_scheduler(
-            build_tick(runtime, sender, settings),
-            wellness_tick=build_wellness_tick(runtime, wellness_sender, settings),
-        )
+        scheduler = build_all_jobs(runtime, app.bot, settings)
         scheduler.start()
         app.bot_data["scheduler"] = scheduler
 

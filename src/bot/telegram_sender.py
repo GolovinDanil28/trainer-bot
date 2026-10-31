@@ -44,3 +44,14 @@ class TelegramWellnessSender:
             text=format_wellness_prompt(),
             reply_markup=wellness_keyboard(prompt.day),
         )
+
+
+class TelegramReportSender:
+    """Отправка недельного разбора обычным текстом (R-40)."""
+
+    def __init__(self, bot: Bot, chat_id: int) -> None:
+        self._bot = bot
+        self._chat_id = chat_id
+
+    async def send_text(self, text: str) -> None:
+        await self._bot.send_message(chat_id=self._chat_id, text=text)
