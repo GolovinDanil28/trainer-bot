@@ -244,20 +244,48 @@ def _parse_type(raw: str) -> str:
     return normalize_workout_type(raw)
 
 
+_DURATION_HOURS = re.compile(
+    r"^(?:(?P<hours>\d{1,2})ч(?:(?P<minutes>\d{1,2}))?"
+    r"|(?P<h>\d{1,2}):(?P<m>\d{2})"
+    r"|(?P<plain>\d{1,3}))$",
+    re.IGNORECASE,
+)
+
+
 def _parse_duration_arg(raw: str) -> int:
-    """Минуты из четвёртого аргумента: целое 5–600 (R-01)."""
-    if not raw.isdigit():
+    """Длительность из четвёртого аргумента (R-01).
+
+    Три записи с одним смыслом: `40` — минуты, `1ч30`/`2ч` — часы,
+    `1:30` — `Ч:ММ`. Всё нормализуется в минуты до проверки границ,
+    иначе `1ч70` молча стало бы «2 часа 10 минут».
+    """
+    value = raw.strip().lower()
+    match = _DURATION_HOURS.fullmatch(value)
+    if match is None:
         raise CommandError(
-            f"Длительность должна быть целым числом минут, получено «{raw}». "
-            f"Допустимо {MIN_DURATION_ARG_MIN}–{MAX_DURATION_ARG_MIN}. Пример: {EXAMPLE}"
+            f"Длительность должна быть минутами (40), часами (1ч30) или Ч:ММ (1:30), "
+            f"получено «{raw}». Пример: {EXAMPLE}"
         )
-    value = int(raw)
-    if not MIN_DURATION_ARG_MIN <= value <= MAX_DURATION_ARG_MIN:
+
+    if match["plain"] is not None:
+        minutes = int(match["plain"])
+    elif match["h"] is not None:
+        minutes = int(match["h"]) * 60 + int(match["m"])
+    else:
+        hours = int(match["hours"])
+        rest = int(match["minutes"] or 0)
+        if rest > 59:
+            raise CommandError(
+                f"В длительности «{raw}» больше 59 минут: запиши как 2ч10 или 130."
+            )
+        minutes = hours * 60 + rest
+
+    if not MIN_DURATION_ARG_MIN <= minutes <= MAX_DURATION_ARG_MIN:
         raise CommandError(
             f"Длительность вне диапазона {MIN_DURATION_ARG_MIN}–"
-            f"{MAX_DURATION_ARG_MIN} минут, получено {value}. Пример: {EXAMPLE}"
+            f"{MAX_DURATION_ARG_MIN} минут, получено {minutes}. Пример: {EXAMPLE}"
         )
-    return value
+    return minutes
 
 
 def _parse_weekdays(raw: str) -> tuple[Weekday, ...]:
@@ -279,19 +307,27 @@ def _parse_weekdays(raw: str) -> tuple[Weekday, ...]:
 
 
 def _parse_time(raw: str) -> time:
-    match = _TIME_RE.fullmatch(raw.strip())
-    if match is None:
-        raise CommandError(
-            f"Время должно быть в формате ЧЧ:ММ, получено «{raw}». Пример: {EXAMPLE}"
-        )
+    """Время: `ЧЧ:ММ` или часы без минут (`20` = 20:00), 0–23 (R-01)."""
+    value = raw.strip()
+    match = _TIME_RE.fullmatch(value)
+    if match is not None:
+        hour, minute = int(match["hour"]), int(match["minute"])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise CommandError(
+                f"Время вне диапазона 00:00–23:59, получено «{raw}». Пример: {EXAMPLE}"
+            )
+        return time(hour=hour, minute=minute)
 
-    hour, minute = int(match["hour"]), int(match["minute"])
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        raise CommandError(
-            f"Время вне диапазона 00:00–23:59, получено «{raw}». Пример: {EXAMPLE}"
-        )
+    if value.isdigit() and len(value) <= 2:
+        # «в 20» — это 20:00: минуты не названы, значит ноль.
+        hour = int(value)
+        if 0 <= hour <= 23:
+            return time(hour=hour, minute=0)
 
-    return time(hour=hour, minute=minute)
+    raise CommandError(
+        f"Время должно быть ЧЧ:ММ или часом без минут, получено «{raw}». "
+        f"Пример: {EXAMPLE}"
+    )
 
 
 # Дата, названная словами, которую модель возвращает как токен (D2).

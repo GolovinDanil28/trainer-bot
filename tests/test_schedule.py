@@ -55,8 +55,39 @@ def test_time_out_of_range_is_rejected_with_example():
 
 
 def test_bad_time_format_is_rejected():
-    with pytest.raises(CommandError, match="формате ЧЧ:ММ"):
+    with pytest.raises(CommandError, match="ЧЧ:ММ"):
         parse_new_command("/new strength Пн 19-30")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("20", time(20, 0)), ("7", time(7, 0)), ("0", time(0, 0)),
+     ("23", time(23, 0)), ("20:15", time(20, 15))],
+)
+def test_time_accepts_hour_without_minutes(raw, expected):
+    assert parse_new_command(f"/new бег Пн {raw}").time_of_day == expected
+
+
+@pytest.mark.parametrize("raw", ["24", "25", "99", "19-30"])
+def test_bad_hour_is_rejected(raw):
+    with pytest.raises(CommandError):
+        parse_new_command(f"/new бег Пн {raw}")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("40", 40), ("1ч30", 90), ("2ч", 120), ("1:30", 90), ("0:30", 30), ("0:05", 5)],
+)
+def test_duration_accepts_minutes_and_hours(raw, expected):
+    draft = parse_new_command(f"/new бег Пн 19:30 {raw}")
+
+    assert draft.duration_min == expected
+
+
+@pytest.mark.parametrize("raw", ["1ч70", "11:00", "0:02", "1ч00м", "ч", "1:5"])
+def test_bad_duration_formats_are_rejected(raw):
+    with pytest.raises(CommandError):
+        parse_new_command(f"/new бег Пн 19:30 {raw}")
 
 
 def test_unknown_weekday_is_rejected_with_allowed_list():
