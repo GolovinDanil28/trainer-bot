@@ -31,6 +31,11 @@ TELEGRAM_MESSAGE_LIMIT = 4096
 MAX_CARD_LENGTH = 1600
 
 
+def plain(text: str) -> str:
+    """Текст без HTML-тегов: смысл карточки не должен зависеть от разметки."""
+    return re.sub(r"<[^>]+>", "", text)
+
+
 def test_normalize_ignores_case_punctuation_and_yo():
     assert normalize("  Ёлка, HELP!  ") == "елка help"
     assert normalize("Что   ты умеешь?") == "что ты умеешь"
@@ -115,19 +120,23 @@ def test_free_text_examples_point_to_real_commands():
 
 
 def test_help_card_has_all_sections_and_commands():
-    text = format_help()
+    text = plain(format_help())
 
-    for section in ("Что я умею", "Команды:", "Можно фразой:", "Правила плана"):
+    for section in ("Что я умею", "Команды", "Можно фразой", "Правила плана"):
         assert section in text, section
 
+    lines = text.splitlines()
     for entry in COMMANDS:
         assert f"{entry.command} — {entry.purpose}" in text
+        index = next(
+            i for i, line in enumerate(lines) if line.startswith(f"• {entry.command} —")
+        )
         if entry.example != entry.command:
-            # Пример обязан быть в карточке, только если он содержательный.
-            assert f"  {entry.example}" in text
+            # Содержательный пример — отдельной строкой сразу под командой.
+            assert lines[index + 1].strip() == entry.example
         else:
-            # Дублирующий пример (example == command) не печатается (R-28).
-            assert f"  {entry.command}" not in text
+            # Дублирующий пример не печатается (R-28).
+            assert lines[index + 1].strip() != entry.command
 
     for phrase, meaning in FREE_TEXT_EXAMPLES:
         assert f"«{phrase}» → {meaning}" in text
@@ -186,6 +195,14 @@ def test_week_line_explains_what_is_inside():
     assert "что менять" in text
 
 
+def test_card_uses_html_and_survives_without_it():
+    text = format_help()
+
+    assert "<b>" in text and "<code>" in text
+    assert "<" not in plain(text)
+    assert "**" not in text
+
+
 def test_help_card_fits_one_message():
     text = format_help()
 
@@ -196,7 +213,7 @@ def test_help_card_fits_one_message():
 def test_start_greets_and_reuses_the_card():
     text = format_start()
 
-    assert text.startswith("Привет!")
+    assert plain(text).startswith("👋 Привет!")
     assert format_help() in text
 
 
