@@ -101,6 +101,25 @@ async def test_cmd_help_replies_with_card(service):
     assert update.message.sent == [format_help()]
 
 
+async def test_cmd_help_sends_html(service):
+    update = make_update("/help")
+
+    await cmd_help(update, service_context(service))
+
+    assert update.message.parse_modes == ["HTML"]
+
+
+async def test_help_phrase_sends_html_without_model(service):
+    llm = FakeLLM(answers={"помоги": '{"action":"none"}'})
+    bot = FakeBot()
+    update = make_update("помоги")
+
+    await on_free_text(update, free_text_context(service, llm, bot))
+
+    assert update.message.parse_modes == ["HTML"]
+    assert llm.calls == []
+
+
 async def test_cmd_start_greets_and_shows_card(service):
     update = make_update("/start")
 
