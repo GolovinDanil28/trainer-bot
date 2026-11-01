@@ -187,6 +187,15 @@ def test_card_examples_are_in_owner_language():
     assert "/new бег" in text
 
 
+def test_phrase_examples_show_duration():
+    # R-01: длительность задаётся и фразой. Пример обязан это показывать,
+    # иначе владелец не узнает, что так можно.
+    text = plain(format_help())
+
+    assert "«бег по средам в 19:30 на 40 минут»" in text
+    assert "/new бег Ср 19:30 40" in text
+
+
 def test_week_line_explains_what_is_inside():
     text = format_help()
 
