@@ -106,7 +106,7 @@ async def test_cmd_start_greets_and_shows_card(service):
 
     await cmd_start(update, service_context(service))
 
-    assert update.message.sent[0].startswith("Привет!")
+    assert "Привет!" in update.message.sent[0]
     assert format_help() in update.message.sent[0]
 
 

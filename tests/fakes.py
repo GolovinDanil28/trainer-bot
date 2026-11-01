@@ -91,11 +91,18 @@ class FakeMessage:
         self.chat_id = 42
         self.sent: list[str] = []
         self.markups: list[object | None] = []
+        self.parse_modes: list[str | None] = []
         self.events = events if events is not None else []
 
-    async def reply_text(self, text: str, reply_markup: object | None = None) -> None:
+    async def reply_text(
+        self,
+        text: str,
+        reply_markup: object | None = None,
+        parse_mode: str | None = None,
+    ) -> None:
         self.sent.append(text)
         self.markups.append(reply_markup)
+        self.parse_modes.append(parse_mode)
         self.events.append("reply")
 
 

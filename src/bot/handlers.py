@@ -37,13 +37,13 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @owner_only
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/start` — приветствие и карточка возможностей (R-28)."""
-    await update.message.reply_text(format_start())
+    await update.message.reply_text(format_start(), parse_mode="HTML")
 
 
 @owner_only
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/help` — карточка возможностей (R-28)."""
-    await update.message.reply_text(format_help())
+    await update.message.reply_text(format_help(), parse_mode="HTML")
 
 
 @owner_only
@@ -102,7 +102,7 @@ async def on_free_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Справка — вход, а не запрос к модели: она обязана работать при выключенной
     # Ollama и отвечать мгновенно (R-29, R-30).
     if is_help_request(text):
-        await message.reply_text(format_help())
+        await message.reply_text(format_help(), parse_mode="HTML")
         return
 
     # «Печатает…» — до ожидания модели: при T=20 пользователь видит, что бот

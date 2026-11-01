@@ -6,6 +6,7 @@
 
 from collections.abc import Sequence
 from datetime import time
+from html import escape
 from zoneinfo import ZoneInfo
 
 from src.core.help import COMMANDS, FREE_TEXT_EXAMPLES, HELP_TRIGGER_HINT
@@ -172,51 +173,61 @@ def format_assistant_unclear() -> str:
 # Правила собираются из констант плана, а не пишутся текстом: иначе изменение
 # правила в `core/plan.py` оставит карточку врать — молча.
 HELP_PLAN_RULES = (
-    f"Правила плана: оценка 1–{REST_MAX_SCORE} — отдых, "
-    f"{LIGHT_SCORE} — тренировка на {100 - REDUCTION_PERCENT} % "
-    f"(минимум {MIN_DURATION_MIN} минут), "
-    f"{LIGHT_SCORE + 1}–5 — как в расписании.\n"
+    f"• оценка 1–{REST_MAX_SCORE} — отдых\n"
+    f"• {LIGHT_SCORE} — тренировка на {100 - REDUCTION_PERCENT} % "
+    f"(минимум {MIN_DURATION_MIN} минут)\n"
+    f"• {LIGHT_SCORE + 1}–5 — как в расписании\n"
     "План не отменяет напоминание: при отдыхе отметь его «пропустил»."
 )
 
 HELP_LIMITS = (
-    "Чего не умею:\n"
-    "— разовые переносы («завтра не смогу»);\n"
-    "— замену одной тренировки другой;\n"
-    "— несколько действий в одной фразе;\n"
-    "— составление плана на следующую неделю."
+    "• разовые переносы («завтра не смогу»)\n"
+    "• замену одной тренировки другой\n"
+    "• несколько действий в одной фразе\n"
+    "• составление плана на следующую неделю"
 )
 
 
 def format_help() -> str:
-    """Карточка возможностей (R-28).
+    """Карточка возможностей (R-28) с HTML-разметкой.
 
     Строится из `COMMANDS`, а не пишется строкой: иначе новая команда появится
-    в боте и исчезнет из справки — молча.
+    в боте и исчезнет из справки — молча. Разметка — только `<b>` и `<code>`:
+    HTML в Telegram требует экранировать меньше символов, чем MarkdownV2.
     """
-    lines = ["Что я умею", ""]
-    triggers = ", ".join(f"«{trigger}»" for trigger in HELP_TRIGGER_HINT)
-    lines.append(f"Справку можно попросить словами: {triggers}.")
-    lines.extend(["", "Команды:"])
+    lines = ["<b>Что я умею</b>", ""]
+    triggers = ", ".join(f"«{escape(trigger)}»" for trigger in HELP_TRIGGER_HINT)
+    lines.append(f"💬 Справку можно попросить словами: {triggers}.")
+
+    lines.extend(["", "📋 <b>Команды</b>"])
     for entry in COMMANDS:
-        lines.append(f"{entry.command} — {entry.purpose}")
+        lines.append(f"• <b>{escape(entry.command)}</b> — {escape(entry.purpose)}")
         # Пример печатаем только когда он добавляет информацию: у шести команд
         # из восьми example совпадает с командой, и вторая строка — шум.
         if entry.example != entry.command:
-            lines.append(f"  {entry.example}")
+            lines.append(f"   <code>{escape(entry.example)}</code>")
 
-    lines.extend(["", "Можно фразой:"])
+    lines.extend(["", "🗣 <b>Можно фразой</b>"])
     for phrase, meaning in FREE_TEXT_EXAMPLES:
-        lines.append(f"  «{phrase}» → {meaning}")
+        tail = (
+            f"<code>{escape(meaning)}</code>"
+            if meaning.startswith("/")
+            else escape(meaning)
+        )
+        lines.append(f"• «{escape(phrase)}» → {tail}")
 
-    lines.extend(["", HELP_PLAN_RULES, "", HELP_LIMITS])
+    lines.extend(
+        ["", "📊 <b>Правила плана</b>", HELP_PLAN_RULES,
+         "", "🚫 <b>Чего не умею</b>", HELP_LIMITS]
+    )
     return "\n".join(lines)
 
 
 def format_start() -> str:
     """/start: приветствие и та же карточка, что у /help (R-28)."""
     return (
-        "Привет! Я напоминаю о тренировках, веду журнал и собираю план "
+        "👋 <b>Привет!</b>\n"
+        "Я напоминаю о тренировках, веду журнал и собираю план "
         "по самочувствию.\n\n" + format_help()
     )
 
