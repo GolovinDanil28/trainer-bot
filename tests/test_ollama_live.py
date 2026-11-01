@@ -238,3 +238,15 @@ async def test_live_model_extracts_date_token():
     assert intent.date_raw == "завтра"
     assert intent.days is None
     assert intent.distance_km == 7
+
+
+async def test_live_model_accepts_hour_without_minutes():
+    """R-01: «в 20 часов» — это 20:00, а не отказ."""
+    client = make_client()
+    phrase = "бег по средам в 20 часов на 90 минут"
+    raw = await client.intent_json(phrase, SNAPSHOT)
+    intent = parse_intent(raw, phrase)
+
+    assert intent.action is AssistantAction.CREATE
+    assert intent.time == "20:00"
+    assert intent.duration_min == 90
