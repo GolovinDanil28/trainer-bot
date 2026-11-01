@@ -180,8 +180,14 @@ class WorkoutView:
     time_once: time | None = None
 
 
+# Границы длительности из команды: 5 минут — нижняя граница плана, 600 —
+# десять часов; выше начинается «две тренировки в одной строке».
+MIN_DURATION_ARG_MIN = 5
+MAX_DURATION_ARG_MIN = 600
+
+
 def parse_new_command(text: str) -> WorkoutDraft:
-    """Разобрать `/new <тип> <дни> <время>` или бросить `CommandError`."""
+    """Разобрать `/new <тип> <дни> <время> [минуты]` или бросить `CommandError`."""
     parts = text.split()
     if not parts:
         raise CommandError(f"Пустая команда. Пример: {EXAMPLE}")
@@ -192,16 +198,20 @@ def parse_new_command(text: str) -> WorkoutDraft:
         raise CommandError(f"Ожидалась команда /new, получено «{parts[0]}». Пример: {EXAMPLE}")
 
     args = parts[1:]
-    if len(args) != 3:
+    if len(args) not in (3, 4):
         raise CommandError(
-            f"Нужно три аргумента: тип, дни, время. Получено {len(args)}. Пример: {EXAMPLE}"
+            "Нужно три аргумента (тип, дни, время) и необязательный четвёртый "
+            f"(минуты). Получено {len(args)}. Пример: {EXAMPLE}"
         )
 
     workout_type = _parse_type(args[0])
     weekdays = _parse_weekdays(args[1])
     time_of_day = _parse_time(args[2])
+    duration_min = _parse_duration_arg(args[3]) if len(args) == 4 else None
 
-    return make_weekly_draft(workout_type, weekdays, time_of_day)
+    return make_weekly_draft(
+        workout_type, weekdays, time_of_day, duration_min=duration_min
+    )
 
 
 def make_weekly_draft(
@@ -232,6 +242,22 @@ def make_weekly_draft(
 def _parse_type(raw: str) -> str:
     """Тип из `/new`: свободная фраза проверяется теми же границами, что R-33."""
     return normalize_workout_type(raw)
+
+
+def _parse_duration_arg(raw: str) -> int:
+    """Минуты из четвёртого аргумента: целое 5–600 (R-01)."""
+    if not raw.isdigit():
+        raise CommandError(
+            f"Длительность должна быть целым числом минут, получено «{raw}». "
+            f"Допустимо {MIN_DURATION_ARG_MIN}–{MAX_DURATION_ARG_MIN}. Пример: {EXAMPLE}"
+        )
+    value = int(raw)
+    if not MIN_DURATION_ARG_MIN <= value <= MAX_DURATION_ARG_MIN:
+        raise CommandError(
+            f"Длительность вне диапазона {MIN_DURATION_ARG_MIN}–"
+            f"{MAX_DURATION_ARG_MIN} минут, получено {value}. Пример: {EXAMPLE}"
+        )
+    return value
 
 
 def _parse_weekdays(raw: str) -> tuple[Weekday, ...]:
