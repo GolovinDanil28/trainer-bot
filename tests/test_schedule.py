@@ -86,7 +86,22 @@ def test_too_long_type_is_rejected():
 
 def test_wrong_argument_count_is_rejected():
     with pytest.raises(CommandError, match="три аргумента"):
-        parse_new_command("/new strength Пн 19:30 extra")
+        parse_new_command("/new strength Пн 19:30 40 лишнее")
+
+
+def test_duration_argument_is_optional_and_applied():
+    # R-01: четыре аргумента — длительность задана, три — по умолчанию.
+    explicit = parse_new_command("/new бег Пн,Ср 19:30 40")
+    default = parse_new_command("/new бег Пн,Ср 19:30")
+
+    assert explicit.duration_min == 40
+    assert default.duration_min == UNKNOWN_TYPE_DURATION_MIN
+
+
+@pytest.mark.parametrize("raw", ["4", "601", "40.5", "много", "-5"])
+def test_bad_duration_argument_is_rejected(raw):
+    with pytest.raises(CommandError, match="Длительность"):
+        parse_new_command(f"/new бег Пн 19:30 {raw}")
 
 
 def test_other_command_is_rejected():

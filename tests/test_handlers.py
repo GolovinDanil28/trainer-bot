@@ -31,6 +31,14 @@ def service_context(service, args: list[str] | None = None):
     return make_context({"workout_service": service, OWNER_KEY: OWNER_ID}, args)
 
 
+async def test_cmd_new_with_duration_replies_with_minutes(service):
+    update = make_update("/new бег Пн,Ср 19:30 40")
+
+    await cmd_new(update, service_context(service))
+
+    assert update.message.sent == ["Готово: #1 — бег, Пн, Ср, 19:30 (40 мин)."]
+
+
 async def test_cmd_new_creates_workout_and_replies(service, session_factory):
     update = make_update("/new strength Пн 19:30")
 

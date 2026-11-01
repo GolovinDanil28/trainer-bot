@@ -29,7 +29,7 @@ class CommandHelp:
 COMMANDS: tuple[CommandHelp, ...] = (
     CommandHelp("/start", "приветствие и эта справка", "/start"),
     CommandHelp("/help", "эта справка", "/help"),
-    CommandHelp("/new", "создать тренировку", "/new силовая Пн,Ср,Пт 19:30"),
+    CommandHelp("/new", "создать тренировку", "/new бег Пн,Ср 19:30 40"),
     CommandHelp("/list", "показать расписание", "/list"),
     CommandHelp("/off", "отключить тренировку", "/off 2"),
     CommandHelp("/history", "последние отметки", "/history"),
