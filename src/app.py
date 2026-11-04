@@ -30,6 +30,7 @@ from src.bot.handlers import (
     cmd_new,
     cmd_off,
     cmd_plan,
+    cmd_settings,
     cmd_start,
     cmd_week,
     cmd_wellness,
@@ -132,6 +133,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("wellness", cmd_wellness))
     application.add_handler(CommandHandler("week", cmd_week))
     application.add_handler(CommandHandler("plan", cmd_plan))
+    application.add_handler(CommandHandler("settings", cmd_settings))
     application.add_handler(CallbackQueryHandler(on_checkin, pattern=r"^ci:"))
     application.add_handler(CallbackQueryHandler(on_wellness, pattern=r"^wl:"))
     application.add_handler(

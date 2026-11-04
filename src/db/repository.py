@@ -840,3 +840,30 @@ def active_users(session: Session) -> list[UserProfile]:
         select(User).where(User.is_active.is_(True)).order_by(User.id)
     ).all()
     return [_user_profile(row) for row in rows]
+
+
+def update_user_settings(
+    session: Session,
+    user_id: int,
+    *,
+    tz: str | None = None,
+    wellness_time: str | None = None,
+    week_review_time: str | None = None,
+) -> UserProfile:
+    """Обновить только переданные поля настроек (R-45)."""
+    values: dict[str, object] = {}
+    if tz is not None:
+        values["tz"] = tz
+    if wellness_time is not None:
+        values["wellness_time"] = wellness_time
+    if week_review_time is not None:
+        values["week_review_time"] = week_review_time
+    if values:
+        session.execute(
+            update(User).where(User.id == user_id).values(**values)
+        )
+        session.commit()
+    row = session.scalar(select(User).where(User.id == user_id))
+    if row is None:
+        raise RuntimeError("пользователь не найден при обновлении настроек")
+    return _user_profile(row)

@@ -480,3 +480,19 @@ REGISTRATION_CLOSED = "Регистрация закрыта: новых пол�
 def format_registration_hint(enabled: bool) -> str:
     """Что ответить незарегистрированному на `/start` без кода (R-44)."""
     return REGISTRATION_HINT if enabled else REGISTRATION_CLOSED
+
+
+def format_settings(tz: str, wellness_time: str, week_review_time: str) -> str:
+    """Текущие настройки пользователя (R-45)."""
+    return (
+        "Твои настройки:\n"
+        f"• таймзона: <code>{escape(tz)}</code>\n"
+        f"• вопрос о самочувствии: <code>{escape(wellness_time)}</code>\n"
+        f"• недельный разбор: <code>{escape(week_review_time)}</code>\n\n"
+        "Изменить: /settings tz Asia/Yekaterinburg, "
+        "/settings wellness 21:30, /settings week 20:00."
+    )
+
+
+def format_settings_saved(tz: str, wellness_time: str, week_review_time: str) -> str:
+    return "Сохранил.\n\n" + format_settings(tz, wellness_time, week_review_time)

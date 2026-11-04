@@ -12,12 +12,12 @@
 from collections.abc import Awaitable, Callable
 from functools import wraps
 
-from sqlalchemy import select
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.core.users import UserProfile
+from src.db import repository
 from src.db.context import DEFAULT_USER_ID, acting_as
-from src.db.models import User
 
 OWNER_KEY = "owner_id"
 SESSION_FACTORY_KEY = "session_factory"
@@ -30,11 +30,13 @@ REFUSAL_TEXT = "Это личный бот: команды доступны то
 Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
 
 
-def resolve_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
-    """id пользователя в базе или `None`, если он не зарегистрирован.
+def resolve_profile(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> UserProfile | None:
+    """Профиль пользователя или `None`, если он не зарегистрирован.
 
-    Владелец из конфига считается зарегистрированным всегда: он получает
-    пользователя по умолчанию даже если строки ещё нет (первый запуск).
+    Профиль, а не только id: зона нужна каждому запросу (R-45), и брать её
+    вторым запросом в базу незачем.
     """
     telegram = update.effective_user
     if telegram is None:
@@ -43,22 +45,30 @@ def resolve_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int |
     factory = context.bot_data.get(SESSION_FACTORY_KEY)
     if factory is not None:
         with factory() as session:
-            user_id = session.scalar(
-                select(User.id).where(
-                    User.telegram_id == telegram.id,
-                    User.is_active.is_(True),
-                )
-            )
-        if user_id is not None:
-            return int(user_id)
+            profile = repository.user_by_telegram(session, telegram.id)
+        if profile is not None and profile.is_active:
+            return profile
         # Фабрика есть, но строки нет — это посторонний, а не «владелец».
         return None
 
     # Без фабрики (тесты хендлеров) работает только запасной путь владельца.
     owner_id = context.bot_data.get(OWNER_KEY)
     if owner_id is not None and telegram.id == owner_id:
-        return DEFAULT_USER_ID
+        return UserProfile(
+            id=DEFAULT_USER_ID,
+            telegram_id=telegram.id,
+            tz="",
+            wellness_time="21:00",
+            week_review_time="20:00",
+            is_active=True,
+        )
     return None
+
+
+def resolve_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
+    """id пользователя в базе или `None` (обёртка над `resolve_profile`)."""
+    profile = resolve_profile(update, context)
+    return None if profile is None else profile.id
 
 
 def is_registered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -75,9 +85,9 @@ def registered_only(handler: Handler) -> Handler:
 
     @wraps(handler)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        user_id = resolve_user_id(update, context)
-        if user_id is not None:
-            with acting_as(user_id):
+        profile = resolve_profile(update, context)
+        if profile is not None:
+            with acting_as(profile.id, profile.tz or None):
                 await handler(update, context)
             return
 

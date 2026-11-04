@@ -27,6 +27,7 @@ from src.core.wellness import (
     parse_wellness_command,
 )
 from src.db import repository
+from src.db.context import current_zone
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,8 +129,9 @@ class WellnessService:
         `/week` спрашивает про прошлую неделю, авторазбор — про текущую,
         которая заканчивается сегодня (D3).
         """
-        start_utc = datetime.combine(week_start, time.min, tzinfo=self._zone)
-        end_utc = datetime.combine(week_end + timedelta(days=1), time.min, tzinfo=self._zone)
+        zone = current_zone(self._zone)
+        start_utc = datetime.combine(week_start, time.min, tzinfo=zone)
+        end_utc = datetime.combine(week_end + timedelta(days=1), time.min, tzinfo=zone)
         with self._session_factory() as session:
             snapshots = repository.week_snapshots(session, week_start, week_end)
             reminders = repository.week_reminders(session, start_utc, end_utc)
@@ -139,13 +141,13 @@ class WellnessService:
             }
 
         review = build_weekly_review(
-            snapshots, reminders, wellness, week_start, week_end, self._zone, until
+            snapshots, reminders, wellness, week_start, week_end, zone, until
         )
         return format_weekly_review(review)
 
     def _today(self, now_utc: datetime) -> date:
         """Календарный день пользователя для момента в UTC."""
-        return now_utc.astimezone(self._zone).date()
+        return now_utc.astimezone(current_zone(self._zone)).date()
 
     def _with_plan(self, score: int, today: date) -> str:
         with self._session_factory() as session:
