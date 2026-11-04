@@ -192,7 +192,7 @@ def test_phrase_examples_show_duration():
     # иначе владелец не узнает, что так можно.
     text = plain(format_help())
 
-    assert "«бег по средам в 19:30 на 40 минут»" in text
+    assert "«новая тренировка: бег по средам в 19:30 на 40 минут»" in text
     assert "/new бег Ср 19:30 40" in text
 
 
