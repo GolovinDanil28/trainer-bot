@@ -18,6 +18,7 @@ from src.core.messages import (
     format_date_unclear,
     format_disabled,
     format_history,
+    format_moved,
     format_schedule,
     format_unknown_reminder,
     format_unknown_workout,
@@ -28,6 +29,7 @@ from src.core.schedule import (
     Weekday,
     make_once_draft,
     make_weekly_draft,
+    parse_move_command,
     parse_new_command,
     resolve_date,
 )
@@ -79,6 +81,22 @@ class WorkoutService:
                 workout_type, weekdays, time_of_day, distance_km, duration_min
             )
         )
+
+    def move(self, workout_id: int, at: time) -> str:
+        """`/move` — перенести время, сохранив id (R-46)."""
+        with self._session_factory() as session:
+            moved = repository.move_workout_time(session, workout_id, at)
+        if moved is None:
+            return format_unknown_workout(workout_id)
+        return format_moved(moved)
+
+    def move_from_command(self, text: str) -> str:
+        """Разобрать `/move` и выполнить; ошибки ввода — текстом."""
+        try:
+            draft = parse_move_command(text)
+        except CommandError as exc:
+            return str(exc)
+        return self.move(draft.workout_id, draft.time_of_day)
 
     def create_once(
         self,

@@ -50,6 +50,9 @@ _TIME_WORD = re.compile(
 _REMOVE_WORD = re.compile(
     r"\b(убер\w*|удал\w*|выключ\w*|отключ\w*|сним\w*)\b", re.IGNORECASE
 )
+_MOVE_WORD = re.compile(
+    r"\b(перенес\w*|сдвин\w*|поменя\w*\s+врем\w*|перестав\w*)\b", re.IGNORECASE
+)
 
 
 class IntentError(Exception):
@@ -63,6 +66,7 @@ class AssistantAction(StrEnum):
     CREATE = "create"
     LIST = "list"
     OFF = "off"
+    MOVE = "move"
     NONE = "none"
 
 
@@ -173,6 +177,9 @@ def _ensure_grounded(intent: AssistantIntent, text: str) -> None:
     elif intent.action is AssistantAction.OFF:
         if not _REMOVE_WORD.search(text):
             raise IntentError("В тексте нет просьбы убрать тренировку")
+    elif intent.action is AssistantAction.MOVE:
+        if not _MOVE_WORD.search(text):
+            raise IntentError("В тексте нет просьбы перенести тренировку")
 
 
 def parse_intent(raw_json: str, text: str | None = None) -> AssistantIntent:
@@ -280,6 +287,16 @@ def parse_intent(raw_json: str, text: str | None = None) -> AssistantIntent:
         days: list[Weekday] | None = None
         time: str | None = None
         workout_id: int = ar_workout_id
+    elif action == AssistantAction.MOVE:
+        if not isinstance(ar_workout_id, int) or ar_workout_id <= 0:
+            raise IntentError(
+                "Для действия move обязателен положительный целый workout_id."
+            )
+        if ar_time is None:
+            raise IntentError("Для действия move обязательно новое время.")
+        days: list[Weekday] | None = None
+        time: str = _parse_time(ar_time)
+        workout_id: int = ar_workout_id
     elif action == AssistantAction.NONE:
         # При none ожидаем, что type, days, time, workout_id будут None/null.
         # Если модель прислала лишние поля — не критически, игнорируем их.
@@ -311,7 +328,7 @@ _SYSTEM_PROMPT = """Ты переводишь фразу владельца пр
 Отвечай только JSON-объектом, без пояснений и без markdown.
 
 Поля:
-- action: "create" | "list" | "off" | "none"
+- action: "create" | "list" | "off" | "move" | "none"
 - type: короткое название тренировки из текста (1–3 слова: "бег",
   "интервальный бег", "силовая", "кардио", "растяжка") или null
 - type_options: массив из 2–4 названий или null. Заполняй, только если
@@ -334,6 +351,8 @@ _SYSTEM_PROMPT = """Ты переводишь фразу владельца пр
 - list — просьба показать расписание.
 - off — просьба убрать тренировку. workout_id бери из текущего расписания:
   «вторая тренировка» — это строка с номером 2 в списке, а не второй день.
+- move — просьба перенести тренировку на другое время: заполни workout_id из
+  расписания и time новым временем.
 - none — всё остальное.
 
 Дата и дни недели взаимно исключают друг друга: если есть date_raw,
@@ -368,7 +387,9 @@ days = null (тренировка разовая); если есть days, date_
 
 Пример: «бег по средам в 19:00» → action "create", type "бег",
 days ["Ср"], time "19:00"; «интервальный бег 7 км по пятницам в 8 утра» →
-type "интервальный бег", distance_km 7, days ["Пт"], time "08:00".
+type "интервальный бег", distance_km 7, days ["Пт"], time "08:00";
+«перенеси вторую тренировку на восемь вечера» → action "move",
+workout_id 2, time "20:00".
 
 При сомнении всегда возвращай none. Ложное действие хуже отказа."""
 

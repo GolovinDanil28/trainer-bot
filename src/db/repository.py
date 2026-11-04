@@ -867,3 +867,36 @@ def update_user_settings(
     if row is None:
         raise RuntimeError("пользователь не найден при обновлении настроек")
     return _user_profile(row)
+
+
+def move_workout_time(
+    session: Session,
+    workout_id: int,
+    at: time,
+    user_id: int | None = None,
+) -> WorkoutView | None:
+    """Перенести время тренировки, сохранив id и историю (R-46).
+
+    Pending-напоминания старого времени удаляются: иначе они сработают по
+    расписанию, которого уже нет. Отправленные и отвеченные не трогаем.
+    """
+    workout = session.scalars(
+        select(Workout).where(
+            Workout.id == workout_id,
+            Workout.is_active.is_(True),
+            Workout.user_id == _owner(user_id),
+        )
+    ).one_or_none()
+    if workout is None:
+        return None
+
+    _cancel_pending_reminders(session, workout_id)
+    moment = at.strftime("%H:%M")
+    if workout.date_once is not None:
+        workout.time_once = moment
+    else:
+        for row in workout.schedules:
+            if row.is_active:
+                row.time_of_day = moment
+    session.commit()
+    return to_view(workout)
