@@ -468,3 +468,15 @@ def format_weekly_review(review: WeeklyReview) -> str:
 
     lines.extend(["", ADVICE_TEXTS[review.advice], WEEK_SCHEDULE_FOOTER])
     return "\n".join(lines)
+
+
+REGISTRATION_HINT = (
+    "Чтобы пользоваться ботом, пришли инвайт-код командой:\n"
+    "/start <код>"
+)
+REGISTRATION_CLOSED = "Регистрация закрыта: новых пользователей бот не принимает."
+
+
+def format_registration_hint(enabled: bool) -> str:
+    """Что ответить незарегистрированному на `/start` без кода (R-44)."""
+    return REGISTRATION_HINT if enabled else REGISTRATION_CLOSED

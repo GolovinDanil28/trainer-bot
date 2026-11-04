@@ -6,6 +6,7 @@
 
 from dataclasses import dataclass
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import Engine
@@ -19,7 +20,7 @@ from telegram.ext import (
     filters,
 )
 
-from src.bot.access import OWNER_KEY
+from src.bot.access import OWNER_KEY, REGISTRATION_KEY
 from src.bot.assistant_service import AssistantService
 from src.bot.callbacks import on_checkin, on_type_choice, on_wellness
 from src.bot.handlers import (
@@ -41,15 +42,21 @@ from src.bot.telegram_sender import (
     TelegramSender,
     TelegramWellnessSender,
 )
+from src.bot.user_service import UserService
 from src.bot.wellness_service import WellnessService
 from src.config import Settings
-from src.core.reminders import ReminderSender
+from src.core.plan import current_week
+from src.core.users import Registration
 from src.db.session import create_db_engine, init_db, make_session_factory
 from src.llm.ollama import OllamaClient
+from src.scheduler.multi import (
+    JobFactories,
+    MultiUserJobs,
+    ReminderJob,
+    WeeklyJob,
+    WellnessJob,
+)
 from src.scheduler.runner import build_scheduler
-from src.scheduler.tick import SchedulerTick
-from src.scheduler.weekly_tick import WeeklyTick
-from src.scheduler.wellness_tick import WellnessTick
 
 
 @dataclass
@@ -81,57 +88,36 @@ def build_runtime(settings: Settings) -> Runtime:
     )
 
 
-def build_tick(runtime: Runtime, sender: ReminderSender, settings: Settings) -> SchedulerTick:
-    """Тик с настройками пользователя: таймзона и окно ожидания ответа."""
+def build_all_jobs(runtime: Runtime, bot: Bot, settings: Settings) -> AsyncIOScheduler:
+    """Все три job в одном месте: обход пользователей, отправители, зоны."""
+
+    def render_weekly(user, now):  # noqa: ANN001, ANN202
+        """Текст разбора собирается в зоне и от имени конкретного человека."""
+        zone = ZoneInfo(user.tz)
+        start, end = current_week(now.astimezone(zone).date())
+        service = WellnessService(
+            runtime.session_factory, zone, clock=lambda: now
+        )
+        return service.weekly_review_for(start, end, now)
+
+    factories = JobFactories(
+        reminder_sender=lambda user: TelegramSender(
+            bot, user.telegram_id, ZoneInfo(user.tz)
+        ),
+        wellness_sender=lambda user: TelegramWellnessSender(bot, user.telegram_id),
+        report_sender=lambda user: TelegramReportSender(bot, user.telegram_id).send_text,
+        render_weekly=render_weekly,
+    )
     miss_window = (
         timedelta(hours=settings.miss_window_hours)
         if settings.miss_window_hours is not None
         else None
     )
-    return SchedulerTick(
-        runtime.session_factory,
-        sender,
-        settings.zone,
-        miss_window=miss_window,
-    )
-
-
-def build_wellness_tick(
-    runtime: Runtime, sender: TelegramWellnessSender, settings: Settings
-) -> WellnessTick:
-    """Тик вечернего вопроса: своё время из конфига, та же таймзона."""
-    return WellnessTick(
-        runtime.session_factory,
-        sender,
-        settings.zone,
-        settings.wellness_at,
-    )
-
-
-def build_weekly_tick(
-    runtime: Runtime, sender: TelegramReportSender, settings: Settings
-) -> WeeklyTick:
-    """Тик воскресного разбора: текст берётся у сервиса, доставка — у Telegram."""
-    return WeeklyTick(
-        runtime.session_factory,
-        sender.send_text,
-        settings.zone,
-        settings.week_review_at,
-        render=lambda start, end, until: runtime.wellness.weekly_review_for(
-            start, end, until
-        ),
-    )
-
-
-def build_all_jobs(runtime: Runtime, bot: Bot, settings: Settings) -> AsyncIOScheduler:
-    """Все три job в одном месте: так сборку можно проверить без сети."""
-    sender = TelegramSender(bot, settings.owner_id, settings.zone)
-    wellness_sender = TelegramWellnessSender(bot, settings.owner_id)
-    report_sender = TelegramReportSender(bot, settings.owner_id)
+    jobs = MultiUserJobs(runtime.session_factory, factories, miss_window=miss_window)
     return build_scheduler(
-        build_tick(runtime, sender, settings),
-        wellness_tick=build_wellness_tick(runtime, wellness_sender, settings),
-        weekly_tick=build_weekly_tick(runtime, report_sender, settings),
+        ReminderJob(jobs),
+        wellness_tick=WellnessJob(jobs),
+        weekly_tick=WeeklyJob(jobs),
     )
 
 
@@ -168,6 +154,16 @@ def build_application(settings: Settings, runtime: Runtime | None = None) -> App
         Application.builder().token(settings.bot_token.get_secret_value()).build()
     )
     application.bot_data["session_factory"] = runtime.session_factory
+    registration = Registration(
+        settings.invite_code,
+        settings.tz,
+        settings.wellness_time,
+        settings.week_review_time,
+    )
+    application.bot_data[REGISTRATION_KEY] = registration
+    application.bot_data["user_service"] = UserService(
+        runtime.session_factory, registration
+    )
     application.bot_data["workout_service"] = runtime.service
     application.bot_data["wellness_service"] = runtime.wellness
     # Уточнения типа живут в памяти процесса и стареют сами (R-34).

@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     # Время вечернего вопроса о самочувствии в таймзоне пользователя.
     # Локальное «21:00», а не UTC-момент: вопрос — свойство дня, а не точки.
     wellness_time: str = "21:00"
+    # Многоразовый код входа; пустой отключает регистрацию (R-44).
+    invite_code: str = ""
     # Воскресный разбор недели: время по таймзоне владельца (R-40).
     week_review_time: str = "20:00"
 
@@ -89,6 +91,12 @@ class Settings(BaseSettings):
                 "Пример: http://localhost:11434"
             )
         return value
+
+    @field_validator("invite_code")
+    @classmethod
+    def _invite_code_is_trimmed(cls, value: str) -> str:
+        """Код без пробелов по краям: случайный пробел не должен ломать вход."""
+        return value.strip()
 
     @field_validator("wellness_time")
     @classmethod

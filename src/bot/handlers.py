@@ -9,13 +9,18 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
-from src.bot.access import owner_only
+from src.bot.access import REGISTRATION_KEY, owner_only, resolve_user_id
 from src.bot.pending import PendingChoices
 from src.bot.service import WorkoutService
+from src.bot.user_service import UserService
 from src.bot.wellness_service import WellnessService
 from src.core.choice import build_type_choice_callback
 from src.core.help import is_help_request
-from src.core.messages import format_help, format_start
+from src.core.messages import (
+    format_help,
+    format_registration_hint,
+    format_start,
+)
 from src.db.context import current_user_id
 
 
@@ -34,10 +39,26 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(_service(context).create_from_command(text or ""))
 
 
-@owner_only
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """`/start` — приветствие и карточка возможностей (R-28)."""
-    await update.message.reply_text(format_start(), parse_mode="HTML")
+    """`/start` — карточка, а для нового человека — вход по коду (R-28, R-44).
+
+    Единственная команда без `registered_only`: иначе зарегистрироваться было
+    бы нечем. Код разбирает сервис, а не хендлер.
+    """
+    message = update.message
+    if message is None or update.effective_user is None:
+        return
+
+    if resolve_user_id(update, context) is None:
+        code = context.args[0] if context.args else ""
+        users: UserService = context.bot_data["user_service"]
+        profile = users.register(update.effective_user.id, code)
+        if profile is None:
+            registration = context.bot_data[REGISTRATION_KEY]
+            await message.reply_text(format_registration_hint(registration.enabled))
+            return
+
+    await message.reply_text(format_start(), parse_mode="HTML")
 
 
 @owner_only
