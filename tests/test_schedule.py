@@ -116,7 +116,7 @@ def test_too_long_type_is_rejected():
 
 
 def test_wrong_argument_count_is_rejected():
-    with pytest.raises(CommandError, match="три аргумента"):
+    with pytest.raises(CommandError, match="Нужно: тип"):
         parse_new_command("/new strength Пн 19:30 40 лишнее")
 
 
@@ -133,6 +133,47 @@ def test_duration_argument_is_optional_and_applied():
 def test_bad_duration_argument_is_rejected(raw):
     with pytest.raises(CommandError, match="Длительность"):
         parse_new_command(f"/new бег Пн 19:30 {raw}")
+
+
+@pytest.mark.parametrize("day", ["пт", "пятница", "пятницу", "по пятницам"])
+def test_full_weekday_names_are_accepted(day):
+    draft = parse_new_command(f"/new бег {day} 19:00")
+
+    assert draft.weekdays == (Weekday.FRIDAY,)
+
+
+@pytest.mark.parametrize(
+    ("text", "km"),
+    [
+        ("/new бег 10км пт 19:00", 10.0),
+        ("/new бег пт 19:00 10км", 10.0),
+        ("/new бег пт 19:00 10 км", 10.0),
+        ("/new бег пт 19:00 10 km", 10.0),
+        ("/new бег 10,5км пт 19:00", 10.5),
+    ],
+)
+def test_distance_is_extracted_anywhere(text, km):
+    draft = parse_new_command(text)
+
+    assert draft.distance_km == km
+    assert draft.duration_min == int(km * 10 // 5) * 5
+
+
+def test_distance_and_explicit_duration():
+    draft = parse_new_command("/new бег 10км пт 19:00 40")
+
+    assert (draft.distance_km, draft.duration_min) == (10.0, 40)
+
+
+@pytest.mark.parametrize("text", ["/new бег 0км пт 19:00", "/new бег 101км пт 19:00"])
+def test_bad_distance_rejected(text):
+    with pytest.raises(CommandError, match="Дистанция"):
+        parse_new_command(text)
+
+
+def test_two_distances_rejected():
+    with pytest.raises(CommandError, match="дважды"):
+        parse_new_command("/new бег 5км пт 19:00 7км")
 
 
 def test_other_command_is_rejected():

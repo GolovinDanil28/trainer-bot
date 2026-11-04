@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, time, timedelta
 from enum import IntEnum, StrEnum
 
-EXAMPLE = "/new strength Пн,Ср,Пт 19:30"
+EXAMPLE = "/new бег 10км Пт 19:30"
 MOVE_EXAMPLE = "/move 2 20:00"
 
 _TIME_RE = re.compile(r"(?P<hour>\d{1,2}):(?P<minute>\d{2})")
@@ -55,6 +55,16 @@ WEEKDAY_ALIASES: dict[str, Weekday] = {
     "сб": Weekday.SATURDAY,
     "вс": Weekday.SUNDAY,
 }
+
+_FULL_DAY_ROOTS: tuple[tuple[str, Weekday], ...] = (
+    ("понед", Weekday.MONDAY),
+    ("вторн", Weekday.TUESDAY),
+    ("сред", Weekday.WEDNESDAY),
+    ("четвер", Weekday.THURSDAY),
+    ("пятн", Weekday.FRIDAY),
+    ("суббот", Weekday.SATURDAY),
+    ("воскрес", Weekday.SUNDAY),
+)
 
 # Длительность по умолчанию: в команде `/new` её нет, а в напоминании (R-07)
 # она должна быть. Значения можно будет менять отдельной командой.
@@ -187,6 +197,82 @@ MIN_DURATION_ARG_MIN = 5
 MAX_DURATION_ARG_MIN = 600
 
 
+_DISTANCE = re.compile(r"^(?P<value>\d+(?:[.,]\d+)?)(?:км|km)$", re.IGNORECASE)
+MAX_COMMAND_DISTANCE_KM = 100.0
+
+
+def _number(raw: str) -> float:
+    return float(raw.replace(",", "."))
+
+
+def _extract_distance(args: list[str]) -> tuple[list[str], float | None]:
+    """Вынуть дистанцию из любого места после типа (R-01).
+
+    `10км`, `10.5км`, `10 км`, `10 km`. Одиночное число дистанцией не считается:
+    `10` — это время или минуты, иначе позиции начнут путаться.
+    """
+    rest: list[str] = []
+    distance: float | None = None
+    index = 0
+    while index < len(args):
+        token = args[index]
+        match = _DISTANCE.fullmatch(token)
+        value: float | None = None
+        if match is not None:
+            value = _number(match["value"])
+        elif (
+            token.replace(",", ".").replace(".", "").isdigit()
+            and index + 1 < len(args)
+            and args[index + 1].lower() in {"км", "km"}
+        ):
+            value = _number(token)
+            index += 1
+        if value is None:
+            rest.append(token)
+            index += 1
+            continue
+
+        if distance is not None:
+            raise CommandError("Дистанция указана дважды. Пример: " + EXAMPLE)
+        if not 0 < value <= MAX_COMMAND_DISTANCE_KM:
+            raise CommandError(
+                f"Дистанция должна быть больше 0 и не больше "
+                f"{MAX_COMMAND_DISTANCE_KM:g} км, получено {value:g}. Пример: {EXAMPLE}"
+            )
+        distance = value
+        index += 1
+    return rest, distance
+
+
+def _join_day_prepositions(args: list[str]) -> list[str]:
+    """«по пятницам» и «в пятницу» — предлог относится к дню, а не к типу."""
+    result: list[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index].lower()
+        if (
+            token in {"по", "в"}
+            and index + 1 < len(args)
+            and _day(token=args[index + 1]) is not None
+        ):
+            result.append(args[index + 1])
+            index += 2
+            continue
+        result.append(args[index])
+        index += 1
+    return result
+
+
+def _day(token: str) -> Weekday | None:
+    key = token.strip().lower().rstrip(".")
+    if key in WEEKDAY_ALIASES:
+        return WEEKDAY_ALIASES[key]
+    for root, day in _FULL_DAY_ROOTS:
+        if key.startswith(root):
+            return day
+    return None
+
+
 def parse_new_command(text: str) -> WorkoutDraft:
     """Разобрать `/new <тип> <дни> <время> [минуты]` или бросить `CommandError`."""
     parts = text.split()
@@ -198,11 +284,12 @@ def parse_new_command(text: str) -> WorkoutDraft:
     if command != "/new":
         raise CommandError(f"Ожидалась команда /new, получено «{parts[0]}». Пример: {EXAMPLE}")
 
-    args = parts[1:]
+    args, distance_km = _extract_distance(parts[1:])
+    args = _join_day_prepositions(args)
     if len(args) not in (3, 4):
         raise CommandError(
-            "Нужно три аргумента (тип, дни, время) и необязательный четвёртый "
-            f"(минуты). Получено {len(args)}. Пример: {EXAMPLE}"
+            "Нужно: тип, дни и время; дистанция — например, 10км; "
+            f"длительность — необязательно. Получено {len(args)}. Пример: {EXAMPLE}"
         )
 
     workout_type = _parse_type(args[0])
@@ -211,7 +298,11 @@ def parse_new_command(text: str) -> WorkoutDraft:
     duration_min = _parse_duration_arg(args[3]) if len(args) == 4 else None
 
     return make_weekly_draft(
-        workout_type, weekdays, time_of_day, duration_min=duration_min
+        workout_type,
+        weekdays,
+        time_of_day,
+        distance_km=distance_km,
+        duration_min=duration_min,
     )
 
 
@@ -330,11 +421,13 @@ def _parse_weekdays(raw: str) -> tuple[Weekday, ...]:
         key = item.strip().lower().rstrip(".")
         if not key:
             raise CommandError(f"Пустой день в списке «{raw}». Допустимые: {allowed}")
-        if key not in WEEKDAY_ALIASES:
+        day = _day(key)
+        if day is None:
             raise CommandError(
-                f"Неизвестный день «{item.strip()}». Допустимые: {allowed}. Пример: {EXAMPLE}"
+                f"Неизвестный день «{item.strip()}». Допустимые: {allowed}, "
+                f"а также полные названия (пятница). Пример: {EXAMPLE}"
             )
-        days.add(WEEKDAY_ALIASES[key])
+        days.add(day)
 
     # Сортировка делает результат предсказуемым: «Пт,Пн» и «Пн,Пт» — одно и то же.
     return tuple(sorted(days))
