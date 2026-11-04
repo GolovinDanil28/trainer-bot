@@ -148,6 +148,12 @@ class AssistantService:
         if intent.action is AssistantAction.LIST:
             return self._workouts.show_schedule()
 
+        if intent.action is AssistantAction.MOVE:
+            return self._workouts.move(
+                int(intent.workout_id or 0),
+                clock_time.fromisoformat(intent.time or "00:00"),
+            )
+
         return self._workouts.disable(str(intent.workout_id))
 
     def _log(

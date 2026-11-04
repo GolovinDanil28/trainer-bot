@@ -10,6 +10,7 @@ from datetime import date, time, timedelta
 from enum import IntEnum, StrEnum
 
 EXAMPLE = "/new strength Пн,Ср,Пт 19:30"
+MOVE_EXAMPLE = "/move 2 20:00"
 
 _TIME_RE = re.compile(r"(?P<hour>\d{1,2}):(?P<minute>\d{2})")
 
@@ -212,6 +213,39 @@ def parse_new_command(text: str) -> WorkoutDraft:
     return make_weekly_draft(
         workout_type, weekdays, time_of_day, duration_min=duration_min
     )
+
+
+@dataclass(frozen=True, slots=True)
+class MoveDraft:
+    """Готовый к сохранению перенос времени."""
+
+    workout_id: int
+    time_of_day: time
+
+
+def parse_move_command(text: str) -> MoveDraft:
+    """Разобрать `/move <номер> <время>` или бросить `CommandError`."""
+    parts = text.split()
+    command = parts[0].split("@", 1)[0].lower() if parts else ""
+    if command != "/move":
+        raise CommandError(f"Ожидалась команда /move. Пример: {MOVE_EXAMPLE}")
+    args = parts[1:]
+    if len(args) != 2:
+        raise CommandError(
+            f"Нужны номер тренировки и время. Получено {len(args)}. "
+            f"Пример: {MOVE_EXAMPLE}"
+        )
+    raw_id, raw_time = args
+    if not raw_id.isdigit() or int(raw_id) <= 0:
+        raise CommandError(
+            f"Номер тренировки должен быть положительным числом, получено «{raw_id}». "
+            f"Пример: {MOVE_EXAMPLE}"
+        )
+    try:
+        moment = _parse_time(raw_time)
+    except CommandError as exc:
+        raise CommandError(f"{exc} Пример: {MOVE_EXAMPLE}") from exc
+    return MoveDraft(workout_id=int(raw_id), time_of_day=moment)
 
 
 def make_weekly_draft(

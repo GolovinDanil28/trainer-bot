@@ -41,6 +41,7 @@ def test_application_registers_commands(tmp_path):
         "new",
         "list",
         "off",
+        "move",
         "history",
         "wellness",
         "plan",

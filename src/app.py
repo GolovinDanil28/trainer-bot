@@ -27,6 +27,7 @@ from src.bot.handlers import (
     cmd_help,
     cmd_history,
     cmd_list,
+    cmd_move,
     cmd_new,
     cmd_off,
     cmd_plan,
@@ -128,6 +129,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("new", cmd_new))
     application.add_handler(CommandHandler("list", cmd_list))
+    application.add_handler(CommandHandler("move", cmd_move))
     application.add_handler(CommandHandler("off", cmd_off))
     application.add_handler(CommandHandler("history", cmd_history))
     application.add_handler(CommandHandler("wellness", cmd_wellness))
