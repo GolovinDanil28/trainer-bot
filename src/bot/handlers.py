@@ -21,6 +21,7 @@ from src.core.messages import (
     format_registration_hint,
     format_start,
 )
+from src.core.users import UserSettingsError
 from src.db.context import current_user_id
 
 
@@ -59,6 +60,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
     await message.reply_text(format_start(), parse_mode="HTML")
+
+
+@owner_only
+async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/settings` — таймзона и времена напоминаний (R-45)."""
+    users: UserService = context.bot_data["user_service"]
+    try:
+        text = users.settings(current_user_id(), list(context.args or []))
+    except UserSettingsError as exc:
+        await update.message.reply_text(str(exc))
+        return
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 @owner_only

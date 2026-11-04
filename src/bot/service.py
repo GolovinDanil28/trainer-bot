@@ -32,6 +32,7 @@ from src.core.schedule import (
     resolve_date,
 )
 from src.db import repository
+from src.db.context import current_zone
 
 
 class WorkoutService:
@@ -111,7 +112,7 @@ class WorkoutService:
 
     def _today(self) -> date:
         """Календарный день владельца: по нему прячутся прошедшие разовые."""
-        return self._clock().astimezone(self._zone).date()
+        return self._clock().astimezone(current_zone(self._zone)).date()
 
     def schedule_snapshot(self) -> str:
         """Возвращает читаемый снапшот текущих активных тренировок.
@@ -150,4 +151,4 @@ class WorkoutService:
         """`/history` — последние записи журнала в таймзоне пользователя (R-13)."""
         with self._session_factory() as session:
             entries = repository.recent_history(session)
-        return format_history(entries, self._zone)
+        return format_history(entries, current_zone(self._zone))

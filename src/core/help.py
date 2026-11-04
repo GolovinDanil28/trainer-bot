@@ -40,6 +40,11 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "разбор недели: сколько сделано, что мешало, что менять",
         "/week",
     ),
+    CommandHelp(
+        "/settings",
+        "таймзона и время напоминаний",
+        "/settings tz Asia/Yekaterinburg",
+    ),
 )
 
 FREE_TEXT_EXAMPLES: tuple[tuple[str, str], ...] = (
