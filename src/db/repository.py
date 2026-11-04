@@ -28,6 +28,7 @@ from src.core.reminders import (
     ReminderStatus,
 )
 from src.core.schedule import Weekday, WorkoutDraft, WorkoutView
+from src.core.users import UserProfile
 from src.core.wellness import WellnessEntry
 from src.db.context import current_user_id
 from src.db.models import (
@@ -36,6 +37,7 @@ from src.db.models import (
     PlanSnapshotItem,
     Reminder,
     Schedule,
+    User,
     WeeklyReport,
     Wellness,
     Workout,
@@ -783,3 +785,58 @@ def release_weekly_report(
     )
     session.commit()
     return result.rowcount > 0
+
+
+def _user_profile(row: User) -> UserProfile:
+    return UserProfile(
+        id=row.id,
+        telegram_id=row.telegram_id,
+        tz=row.tz,
+        wellness_time=row.wellness_time,
+        week_review_time=row.week_review_time,
+        is_active=row.is_active,
+    )
+
+
+def user_by_telegram(session: Session, telegram_id: int) -> UserProfile | None:
+    """Профиль по telegram id: нужен доступу и регистрации (R-41)."""
+    row = session.scalar(select(User).where(User.telegram_id == telegram_id))
+    return None if row is None else _user_profile(row)
+
+
+def create_user(
+    session: Session,
+    telegram_id: int,
+    tz: str,
+    wellness_time: str,
+    week_review_time: str,
+) -> UserProfile:
+    """Зарегистрировать пользователя идемпотентно (R-44).
+
+    Повторный `/start` с тем же кодом не плодит строк: `ON CONFLICT` по
+    telegram id, затем чтение существующей.
+    """
+    session.execute(
+        sqlite_insert(User)
+        .values(
+            telegram_id=telegram_id,
+            tz=tz,
+            wellness_time=wellness_time,
+            week_review_time=week_review_time,
+            is_active=True,
+        )
+        .on_conflict_do_nothing(index_elements=["telegram_id"])
+    )
+    session.commit()
+    profile = user_by_telegram(session, telegram_id)
+    if profile is None:  # pragma: no cover — вставка выше её создала
+        raise RuntimeError("пользователь не найден после регистрации")
+    return profile
+
+
+def active_users(session: Session) -> list[UserProfile]:
+    """Активные пользователи для обхода планировщиком, по id."""
+    rows = session.scalars(
+        select(User).where(User.is_active.is_(True)).order_by(User.id)
+    ).all()
+    return [_user_profile(row) for row in rows]

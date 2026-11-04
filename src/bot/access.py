@@ -21,6 +21,7 @@ from src.db.models import User
 
 OWNER_KEY = "owner_id"
 SESSION_FACTORY_KEY = "session_factory"
+REGISTRATION_KEY = "registration"
 
 # Нейтральный отказ (R-05): ни названий тренировок, ни истории, ни намёка,
 # что расписание вообще существует.

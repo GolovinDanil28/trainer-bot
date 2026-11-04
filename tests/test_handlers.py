@@ -129,10 +129,10 @@ async def test_cmd_start_greets_and_shows_card(service):
     assert format_help() in update.message.sent[0]
 
 
-# Все команды — через один декоратор, поэтому отказ должен быть буквально
-# одинаковым. Параметризация ловит случай, когда новую команду забыли закрыть.
+# Все команды, кроме /start, — через один декоратор, поэтому отказ должен быть
+# буквально одинаковым. /start открыт для регистрации (R-44) и проверяется
+# отдельно.
 OWNER_COMMANDS = [
-    pytest.param(cmd_start, "/start", id="start"),
     pytest.param(cmd_help, "/help", id="help"),
     pytest.param(cmd_new, "/new strength Пн 19:30", id="new"),
     pytest.param(cmd_list, "/list", id="list"),
