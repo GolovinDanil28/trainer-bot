@@ -900,3 +900,71 @@ def move_workout_time(
                 row.time_of_day = moment
     session.commit()
     return to_view(workout)
+
+
+def workout_by_id(
+    session: Session, workout_id: int, user_id: int | None = None
+) -> WorkoutView | None:
+    """Активная тренировка пользователя по id (R-48)."""
+    workout = session.scalars(
+        select(Workout).where(
+            Workout.id == workout_id,
+            Workout.is_active.is_(True),
+            Workout.user_id == _owner(user_id),
+        )
+    ).one_or_none()
+    return None if workout is None else to_view(workout)
+
+
+def edit_workout(
+    session: Session,
+    workout_id: int,
+    *,
+    workout_type: str | None = None,
+    weekdays: tuple[Weekday, ...] | None = None,
+    date_once: date | None = None,
+    time_of_day: time | None = None,
+    user_id: int | None = None,
+) -> WorkoutView | None:
+    """Изменить тип, дни, дату или время, сохранив id (R-48).
+
+    Смена расписания (дни/дата/время) отменяет pending: иначе они сработают
+    по времени, которого больше нет. Отправленные и отметки не трогаем.
+    """
+    workout = session.scalars(
+        select(Workout).where(
+            Workout.id == workout_id,
+            Workout.is_active.is_(True),
+            Workout.user_id == _owner(user_id),
+        )
+    ).one_or_none()
+    if workout is None:
+        return None
+
+    schedule_changed = weekdays is not None or date_once is not None or time_of_day is not None
+    if schedule_changed:
+        _cancel_pending_reminders(session, workout_id)
+    if workout_type is not None:
+        workout.workout_type = workout_type
+    if time_of_day is not None:
+        moment = time_of_day.strftime("%H:%M")
+        if workout.date_once is not None:
+            workout.time_once = moment
+        else:
+            for row in workout.schedules:
+                if row.is_active:
+                    row.time_of_day = moment
+    if weekdays is not None:
+        source_time = time_of_day or time.fromisoformat(
+            workout.schedules[0].time_of_day
+        )
+        moment = source_time.strftime("%H:%M")
+        session.execute(delete(Schedule).where(Schedule.workout_id == workout_id))
+        session.expire(workout, ["schedules"])
+        workout.schedules = [
+            Schedule(weekday=int(day), time_of_day=moment) for day in weekdays
+        ]
+    if date_once is not None:
+        workout.date_once = date_once
+    session.commit()
+    return to_view(workout)

@@ -33,6 +33,11 @@ COMMANDS: tuple[CommandHelp, ...] = (
     CommandHelp("/list", "показать расписание", "/list"),
     CommandHelp("/off", "отключить тренировку", "/off 2"),
     CommandHelp("/move", "перенести время тренировки", "/move 2 20:00"),
+    CommandHelp(
+        "/edit",
+        "сменить тип, дни или дату тренировки",
+        "/edit 2 days Пн,Ср",
+    ),
     CommandHelp("/history", "последние отметки", "/history"),
     CommandHelp("/wellness", "самочувствие за сегодня", "/wellness 3 не выспался"),
     CommandHelp("/plan", "план на завтра", "/plan"),

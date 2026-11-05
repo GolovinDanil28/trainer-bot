@@ -17,6 +17,7 @@ from src.core.messages import (
     format_created,
     format_date_unclear,
     format_disabled,
+    format_edited,
     format_history,
     format_moved,
     format_schedule,
@@ -29,6 +30,7 @@ from src.core.schedule import (
     Weekday,
     make_once_draft,
     make_weekly_draft,
+    parse_edit_command,
     parse_move_command,
     parse_new_command,
     resolve_date,
@@ -81,6 +83,47 @@ class WorkoutService:
                 workout_type, weekdays, time_of_day, distance_km, duration_min
             )
         )
+
+    def edit_from_command(self, text: str) -> str:
+        """`/edit` — тип, дни, дата или время существующей тренировки (R-48)."""
+        try:
+            draft = parse_edit_command(text)
+        except CommandError as exc:
+            return str(exc)
+
+        with self._session_factory() as session:
+            view = repository.workout_by_id(session, draft.workout_id)
+            if view is None:
+                return format_unknown_workout(draft.workout_id)
+
+            if draft.weekdays is not None and view.date_once is not None:
+                return (
+                    "Это разовая тренировка: у неё есть дата, а не дни. "
+                    "Перенести дату: /edit <номер> date 07.11"
+                )
+            if draft.date_raw is not None and view.date_once is None:
+                return (
+                    "Это недельная тренировка: у неё дни, а не дата. "
+                    "Сменить дни: /edit <номер> days Пн,Ср"
+                )
+
+            new_date = None
+            if draft.date_raw is not None:
+                new_date = resolve_date(draft.date_raw, self._today())
+                if new_date is None:
+                    return format_date_unclear(draft.date_raw)
+
+            edited = repository.edit_workout(
+                session,
+                draft.workout_id,
+                workout_type=draft.workout_type,
+                weekdays=draft.weekdays,
+                date_once=new_date,
+                time_of_day=draft.time_of_day,
+            )
+        if edited is None:
+            return format_unknown_workout(draft.workout_id)
+        return format_edited(edited)
 
     def move(self, workout_id: int, at: time) -> str:
         """`/move` — перенести время, сохранив id (R-46)."""

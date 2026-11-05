@@ -11,6 +11,7 @@ from enum import IntEnum, StrEnum
 
 EXAMPLE = "/new бег 10км Пт 19:30"
 MOVE_EXAMPLE = "/move 2 20:00"
+EDIT_EXAMPLE = "/edit 2 days Пн,Ср"
 
 _TIME_RE = re.compile(r"(?P<hour>\d{1,2}):(?P<minute>\d{2})")
 
@@ -337,6 +338,61 @@ def parse_move_command(text: str) -> MoveDraft:
     except CommandError as exc:
         raise CommandError(f"{exc} Пример: {MOVE_EXAMPLE}") from exc
     return MoveDraft(workout_id=int(raw_id), time_of_day=moment)
+
+
+@dataclass(frozen=True, slots=True)
+class EditDraft:
+    """Что именно меняем у тренировки. Заполнено ровно одно поле."""
+
+    workout_id: int
+    workout_type: str | None = None
+    weekdays: tuple[Weekday, ...] | None = None
+    date_raw: str | None = None
+    time_of_day: time | None = None
+
+
+def parse_edit_command(text: str) -> EditDraft:
+    """Разобрать `/edit <номер> <поле> <значение>` (R-48)."""
+    parts = text.split()
+    command = parts[0].split("@", 1)[0].lower() if parts else ""
+    if command != "/edit":
+        raise CommandError(f"Ожидалась команда /edit. Пример: {EDIT_EXAMPLE}")
+    args = parts[1:]
+    if len(args) < 3:
+        raise CommandError(
+            f"Нужно: номер, поле и значение. Пример: {EDIT_EXAMPLE}"
+        )
+    raw_id, field, *rest = args
+    if not raw_id.isdigit() or int(raw_id) <= 0:
+        raise CommandError(f"Номер тренировки должен быть положительным. Пример: {EDIT_EXAMPLE}")
+
+    field = field.lower()
+    if field == "type":
+        # Тип — свободная фраза, поэтому значение может быть из двух слов.
+        value = " ".join(rest)
+        try:
+            return EditDraft(int(raw_id), workout_type=normalize_workout_type(value))
+        except CommandError as exc:
+            raise CommandError(f"{exc} Пример: {EDIT_EXAMPLE}") from exc
+    if len(rest) != 1 and field != "days":
+        raise CommandError(
+            f"Для поля «{field}» нужно одно значение. Пример: {EDIT_EXAMPLE}"
+        )
+    value = rest[0]
+    if field == "days":
+        joined = " ".join(_join_day_prepositions(rest))
+        return EditDraft(int(raw_id), weekdays=_parse_weekdays(joined))
+    if field == "date":
+        return EditDraft(int(raw_id), date_raw=value)
+    if field == "time":
+        try:
+            return EditDraft(int(raw_id), time_of_day=_parse_time(value))
+        except CommandError as exc:
+            raise CommandError(f"{exc} Пример: {EDIT_EXAMPLE}") from exc
+    raise CommandError(
+        f"Неизвестное поле «{field}». Доступно: type, days, date, time. "
+        f"Пример: {EDIT_EXAMPLE}"
+    )
 
 
 def make_weekly_draft(
