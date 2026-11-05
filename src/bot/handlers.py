@@ -93,6 +93,13 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @owner_only
+async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/edit <номер> <поле> <значение>` — правка тренировки (R-48)."""
+    text = update.message.text if update.message else ""
+    await update.message.reply_text(_service(context).edit_from_command(text or ""))
+
+
+@owner_only
 async def cmd_move(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/move <номер> <время>` — перенести тренировку (R-46)."""
     text = update.message.text if update.message else ""

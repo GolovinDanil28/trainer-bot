@@ -78,6 +78,11 @@ def format_moved(workout: WorkoutView) -> str:
     return f"Перенёс: {_line(workout)}."
 
 
+def format_edited(workout: WorkoutView) -> str:
+    """Подтверждение редактирования тренировки (R-48)."""
+    return f"Изменил: {_line(workout)}."
+
+
 def format_schedule(workouts: Sequence[WorkoutView]) -> str:
     """Список активных тренировок для `/list` (R-02)."""
     if not workouts:

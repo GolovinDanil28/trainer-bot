@@ -43,6 +43,7 @@ def test_application_registers_commands(tmp_path):
         "off",
         "move",
         "history",
+        "edit",
         "wellness",
         "plan",
         "week",
