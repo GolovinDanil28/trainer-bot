@@ -6,7 +6,7 @@ Telegram здесь нет: на вход строка, на выходе стр
 
 import re
 from dataclasses import dataclass
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from enum import IntEnum, StrEnum
 
 EXAMPLE = "/new бег 10км Пт 19:30"
@@ -190,6 +190,8 @@ class WorkoutView:
     distance_km: float | None = None
     date_once: date | None = None
     time_once: time | None = None
+    # Нужен программам упражнений: фаза считается от первой тренировки (R-50).
+    created_at: datetime | None = None
 
 
 # Границы длительности из команды: 5 минут — нижняя граница плана, 600 —

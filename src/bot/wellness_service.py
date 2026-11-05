@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.core.exercises import build_blocks
 from src.core.messages import (
     format_advice,
     format_plan,
@@ -130,7 +131,8 @@ class WellnessService:
 
         with self._session_factory() as session:
             workouts = repository.list_active(session, today)
-        return format_advice(build_advice(reviews, workouts))
+        blocks = build_blocks(workouts, today, current_zone(self._zone))
+        return format_advice(build_advice(reviews, workouts), blocks)
 
     def weekly_review(self, now_utc: datetime | None = None) -> str:
         """`/week`: разбор последней завершённой недели (R-37).
