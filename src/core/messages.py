@@ -20,6 +20,7 @@ from src.core.plan import (
     MissReason,
     PlanItem,
     ScheduleAdvice,
+    WeeklyAdvice,
     WeeklyReview,
 )
 from src.core.reminders import CHECKIN_STATUS_LABELS, CheckinStatus, ReminderMessage
@@ -504,3 +505,59 @@ def format_settings(tz: str, wellness_time: str, week_review_time: str) -> str:
 
 def format_settings_saved(tz: str, wellness_time: str, week_review_time: str) -> str:
     return "Сохранил.\n\n" + format_settings(tz, wellness_time, week_review_time)
+
+
+def _volume_text(minutes: int) -> str:
+    return f"{minutes} минут"
+
+
+def plural_workouts_nominative(count: int) -> str:
+    """«1 тренировка», «2 тренировки», «5 тренировок»."""
+    if count % 10 == 1 and count % 100 != 11:
+        return "тренировка"
+    if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14:
+        return "тренировки"
+    return "тренировок"
+
+
+def format_advice(advice: WeeklyAdvice) -> str:
+    """Рекомендация на неделю: количество и объём (R-49)."""
+    footer = "Расписание я не меняю: /edit, /off, /new."
+
+    if advice.empty_schedule:
+        return (
+            "Рекомендация на неделю\n\n"
+            "Сейчас тренировок нет. Начни с одной на "
+            f"{_volume_text(advice.recommended_volume)}: "
+            "/new бег Пт 19:30.\n"
+            f"{footer}"
+        )
+
+    lines = ["Рекомендация на неделю", ""]
+    if advice.has_data:
+        lines.append(
+            f"Данные: {advice.weeks_with_data} нед., сделано "
+            f"{advice.done} из {advice.planned}, пропусков {advice.misses}."
+        )
+    else:
+        lines.append(
+            "Данных мало: недель с планами — "
+            f"{advice.weeks_with_data}. Совет по текущему расписанию."
+        )
+    lines.append(
+        f"Сейчас: {advice.current_count} "
+        f"{plural_workouts_nominative(advice.current_count)}, около "
+        f"{_volume_text(advice.current_volume or advice.recommended_volume)}."
+    )
+
+    if advice.recommended_count < advice.current_count:
+        reason = " — пропусков больше трети, стоит снизить нагрузку."
+    else:
+        reason = "."
+    lines.append(
+        f"Совет: {advice.recommended_count} "
+        f"{plural_workouts_nominative(advice.recommended_count)} по "
+        f"{_volume_text(advice.recommended_volume)}{reason}"
+    )
+    lines.append(footer)
+    return "\n".join(lines)

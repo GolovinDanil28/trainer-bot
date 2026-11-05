@@ -81,6 +81,12 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @owner_only
+async def cmd_advice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/advice` — рекомендация на следующую неделю (R-49)."""
+    await update.message.reply_text(_wellness(context).advice())
+
+
+@owner_only
 async def cmd_week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/week` — разбор последней завершённой недели (R-37)."""
     await update.message.reply_text(_wellness(context).weekly_review())
