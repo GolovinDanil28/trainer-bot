@@ -115,7 +115,17 @@ def build_all_jobs(runtime: Runtime, bot: Bot, settings: Settings) -> AsyncIOSch
         if settings.miss_window_hours is not None
         else None
     )
-    jobs = MultiUserJobs(runtime.session_factory, factories, miss_window=miss_window)
+    catchup = (
+        timedelta(hours=settings.catchup_hours)
+        if settings.catchup_hours > 0
+        else None
+    )
+    jobs = MultiUserJobs(
+        runtime.session_factory,
+        factories,
+        miss_window=miss_window,
+        catchup_window=catchup,
+    )
     return build_scheduler(
         ReminderJob(jobs),
         wellness_tick=WellnessJob(jobs),
