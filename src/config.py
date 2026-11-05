@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     wellness_time: str = "21:00"
     # Многоразовый код входа; пустой отключает регистрацию (R-44).
     invite_code: str = ""
+    # Окно догона пропущенного напоминания, часы; 0 — выключено (R-47).
+    catchup_hours: int = 2
     # Воскресный разбор недели: время по таймзоне владельца (R-40).
     week_review_time: str = "20:00"
 
@@ -89,6 +91,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"OLLAMA_URL должен быть http(s)-адресом с хостом, получено '{value}'. "
                 "Пример: http://localhost:11434"
+            )
+        return value
+
+    @field_validator("catchup_hours")
+    @classmethod
+    def _catchup_hours_is_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(
+                f"CATCHUP_HOURS не может быть отрицательным, получено {value}"
             )
         return value
 

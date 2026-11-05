@@ -4,7 +4,7 @@
 локальное «Пн 19:30», а конкретный момент рождается на стыке этих двух миров.
 """
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from src.core.schedule import Weekday
@@ -106,3 +106,39 @@ def waiting_cutoff(
     )
     return local_midnight.astimezone(UTC)
 
+
+def past_moment_in_window(
+    now_utc: datetime,
+    zone: ZoneInfo,
+    day: date,
+    at: time,
+    window: timedelta,
+) -> datetime | None:
+    """Момент в прошлом, но не дальше `window` назад (R-47).
+
+    Нужен догону: если бот спал, тик должен увидеть вчерашний/сегодняшний
+    момент, который ещё имеет смысл напомнить.
+    """
+    candidate = _local_moment(day, at, zone).astimezone(UTC)
+    if now_utc - window <= candidate < now_utc:
+        return candidate
+    return None
+
+
+def past_weekly_moment(
+    now_utc: datetime,
+    zone: ZoneInfo,
+    weekday: Weekday,
+    at: time,
+    window: timedelta,
+) -> datetime | None:
+    """Догон недельной тренировки: сегодня и вчера (окно может пересечь полночь)."""
+    local_today = now_utc.astimezone(zone).date()
+    for shift in (0, 1):
+        day = local_today - timedelta(days=shift)
+        if day.weekday() != int(weekday):
+            continue
+        moment = past_moment_in_window(now_utc, zone, day, at, window)
+        if moment is not None:
+            return moment
+    return None

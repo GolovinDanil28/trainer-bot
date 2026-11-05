@@ -17,6 +17,8 @@ from src.core.timeplan import (
     DEFAULT_TICK_WINDOW,
     moment_for_date_in_window,
     moment_in_window,
+    past_moment_in_window,
+    past_weekly_moment,
     waiting_cutoff,
 )
 from src.db import repository
@@ -49,11 +51,13 @@ class SchedulerTick:
         *,
         window: timedelta = DEFAULT_TICK_WINDOW,
         miss_window: timedelta | None = None,
+        catchup_window: timedelta | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._zone = zone
         self._window = window
         self._miss_window = miss_window
+        self._catchup_window = catchup_window
         self._delivery = ReminderDelivery(session_factory, sender)
 
     def due_moments(self, now_utc: datetime) -> list[tuple[int, datetime]]:
@@ -73,6 +77,16 @@ class SchedulerTick:
             )
             if moment is not None:
                 moments.append((workout_id, moment))
+            elif self._catchup_window is not None:
+                late = past_weekly_moment(
+                    now_utc,
+                    self._zone,
+                    Weekday(weekday),
+                    time.fromisoformat(raw_time),
+                    self._catchup_window,
+                )
+                if late is not None:
+                    moments.append((workout_id, late))
 
         # Разовая тренировка напоминает один раз — в свою дату (R-35).
         for workout_id, day, raw_time in once_rows:
@@ -85,6 +99,16 @@ class SchedulerTick:
             )
             if moment is not None:
                 moments.append((workout_id, moment))
+            elif self._catchup_window is not None:
+                late = past_moment_in_window(
+                    now_utc,
+                    self._zone,
+                    day,
+                    time.fromisoformat(raw_time),
+                    self._catchup_window,
+                )
+                if late is not None:
+                    moments.append((workout_id, late))
         return moments
 
     async def run(self, now_utc: datetime) -> TickResult:

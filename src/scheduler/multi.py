@@ -47,10 +47,12 @@ class MultiUserJobs:
         session_factory: sessionmaker[Session],
         factories: JobFactories,
         miss_window: timedelta | None = None,
+        catchup_window: timedelta | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._factories = factories
         self._miss_window = miss_window
+        self._catchup_window = catchup_window
 
     def _users(self) -> list[UserProfile]:
         with self._session_factory() as session:
@@ -64,6 +66,7 @@ class MultiUserJobs:
                 self._factories.reminder_sender(user),
                 zone,
                 miss_window=self._miss_window,
+                catchup_window=self._catchup_window,
             )
             await self._guarded(tick.run(now_utc), "напоминания", user)
 
