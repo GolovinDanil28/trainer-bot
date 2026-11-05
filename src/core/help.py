@@ -46,6 +46,7 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "разбор недели: сколько сделано, что мешало, что менять",
         "/week",
     ),
+    CommandHelp("/advice", "что делать на следующей неделе", "/advice"),
     CommandHelp(
         "/settings",
         "таймзона и время напоминаний",

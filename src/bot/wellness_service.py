@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.messages import (
+    format_advice,
     format_plan,
     format_plan_without_score,
     format_stale_wellness_button,
@@ -20,7 +21,13 @@ from src.core.messages import (
     format_wellness_command_hint,
     format_wellness_saved,
 )
-from src.core.plan import build_plan, build_weekly_review, week_window
+from src.core.plan import (
+    ADVICE_WEEKS,
+    build_advice,
+    build_plan,
+    build_weekly_review,
+    week_window,
+)
 from src.core.wellness import (
     WellnessCommandError,
     WellnessScore,
@@ -110,6 +117,21 @@ class WellnessService:
             assert entry.score is not None
             return self._render_plan(session, today, entry.score)
 
+    def advice(self, now_utc: datetime | None = None) -> str:
+        """`/advice`: рекомендация на неделю по последним 4 неделям (R-49)."""
+        moment = now_utc or self._clock()
+        today = self._today(moment)
+        start, end = week_window(today)
+        reviews = []
+        for shift in range(ADVICE_WEEKS):
+            week_start = start - timedelta(days=7 * shift)
+            week_end = end - timedelta(days=7 * shift)
+            reviews.append(self._review_for(week_start, week_end))
+
+        with self._session_factory() as session:
+            workouts = repository.list_active(session, today)
+        return format_advice(build_advice(reviews, workouts))
+
     def weekly_review(self, now_utc: datetime | None = None) -> str:
         """`/week`: разбор последней завершённой недели (R-37).
 
@@ -129,6 +151,11 @@ class WellnessService:
         `/week` спрашивает про прошлую неделю, авторазбор — про текущую,
         которая заканчивается сегодня (D3).
         """
+        review = self._review_for(week_start, week_end, until)
+        return format_weekly_review(review)
+
+    def _review_for(self, week_start: date, week_end: date, until=None):  # noqa: ANN001
+        """Один разбор за явные границы: общий код `/week` и `/advice`."""
         zone = current_zone(self._zone)
         start_utc = datetime.combine(week_start, time.min, tzinfo=zone)
         end_utc = datetime.combine(week_end + timedelta(days=1), time.min, tzinfo=zone)
@@ -139,11 +166,9 @@ class WellnessService:
                 entry.day: entry
                 for entry in repository.wellness_range(session, week_start, week_end)
             }
-
-        review = build_weekly_review(
+        return build_weekly_review(
             snapshots, reminders, wellness, week_start, week_end, zone, until
         )
-        return format_weekly_review(review)
 
     def _today(self, now_utc: datetime) -> date:
         """Календарный день пользователя для момента в UTC."""

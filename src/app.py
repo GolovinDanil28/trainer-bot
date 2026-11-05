@@ -24,6 +24,7 @@ from src.bot.access import OWNER_KEY, REGISTRATION_KEY
 from src.bot.assistant_service import AssistantService
 from src.bot.callbacks import on_checkin, on_type_choice, on_wellness
 from src.bot.handlers import (
+    cmd_advice,
     cmd_edit,
     cmd_help,
     cmd_history,
@@ -146,6 +147,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("edit", cmd_edit))
     application.add_handler(CommandHandler("wellness", cmd_wellness))
     application.add_handler(CommandHandler("week", cmd_week))
+    application.add_handler(CommandHandler("advice", cmd_advice))
     application.add_handler(CommandHandler("plan", cmd_plan))
     application.add_handler(CommandHandler("settings", cmd_settings))
     application.add_handler(CallbackQueryHandler(on_checkin, pattern=r"^ci:"))

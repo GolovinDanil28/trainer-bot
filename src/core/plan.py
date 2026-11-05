@@ -315,3 +315,87 @@ def _advice(
     if total >= 2 and done * 2 < total:
         return ScheduleAdvice.REDUCE
     return ScheduleAdvice.NONE
+
+
+# --- рекомендация на неделю (R-49) ---------------------------------------
+
+# Сколько завершённых недель смотрим и с какого момента снижаем нагрузку.
+ADVICE_WEEKS = 4
+# Пропусков не меньше трети запланированного — нагрузка не выполняется.
+ADVICE_MISS_RATIO = 3  # misses * 3 >= planned
+# Минимум тренировок в рекомендации и стартовый объём для пустого расписания.
+MIN_ADVICE_WORKOUTS = 1
+START_DURATION_MIN = 30
+
+
+@dataclass(frozen=True, slots=True)
+class WeeklyAdvice:
+    """Совет на следующую неделю: сколько тренировок и какой объём."""
+
+    weeks_with_data: int
+    planned: int
+    done: int
+    misses: int
+    current_count: int
+    current_volume: int | None
+    recommended_count: int
+    recommended_volume: int
+    has_data: bool
+    empty_schedule: bool
+
+
+def _typical_volume(workouts: Sequence[WorkoutView]) -> int | None:
+    """Типичная длительность: медиана, а не среднее (одна длинная не сдвинет)."""
+    durations = sorted(workout.duration_min for workout in workouts)
+    if not durations:
+        return None
+    middle = len(durations) // 2
+    if len(durations) % 2 == 1:
+        return durations[middle]
+    return round((durations[middle - 1] + durations[middle]) / 2)
+
+
+def build_advice(
+    reviews: Sequence[WeeklyReview], workouts: Sequence[WorkoutView]
+) -> WeeklyAdvice:
+    """Собрать рекомендацию. Одинаковый вход — одинаковый совет (R-49)."""
+    weeks_with_data = sum(1 for review in reviews if review.has_snapshots)
+    planned = sum(review.total for review in reviews)
+    done = sum(review.done for review in reviews)
+    misses = sum(len(review.misses) for review in reviews)
+
+    current_count = len(workouts)
+    volume = _typical_volume(workouts)
+    has_data = weeks_with_data >= 2 and planned > 0
+
+    if current_count == 0:
+        # Пустое расписание — не «данных мало», а отдельный старт.
+        return WeeklyAdvice(
+            weeks_with_data=weeks_with_data,
+            planned=planned,
+            done=done,
+            misses=misses,
+            current_count=0,
+            current_volume=None,
+            recommended_count=MIN_ADVICE_WORKOUTS,
+            recommended_volume=START_DURATION_MIN,
+            has_data=has_data,
+            empty_schedule=True,
+        )
+
+    recommended = current_count
+    if has_data and misses * ADVICE_MISS_RATIO >= planned:
+        recommended = max(MIN_ADVICE_WORKOUTS, current_count - 1)
+
+    return WeeklyAdvice(
+        weeks_with_data=weeks_with_data,
+        planned=planned,
+        done=done,
+        misses=misses,
+        current_count=current_count,
+        current_volume=volume,
+        recommended_count=recommended,
+        recommended_volume=volume or START_DURATION_MIN,
+        has_data=has_data,
+        empty_schedule=False,
+    )
