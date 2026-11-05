@@ -166,5 +166,5 @@ async def test_advice_command_is_html_free_and_without_model(session_factory):
 
     await cmd_advice(update, context)
 
-    assert "Рекомендация на неделю" in update.message.sent[0]
+    assert "Совет на неделю" in update.message.sent[0]
     assert bot.actions == []

@@ -529,14 +529,14 @@ def format_advice(
 
     if advice.empty_schedule:
         return (
-            "Рекомендация на неделю\n\n"
+            "💡 Совет на неделю\n\n"
             "Сейчас тренировок нет. Начни с одной на "
             f"{_volume_text(advice.recommended_volume)}: "
             "/new бег Пт 19:30.\n"
             f"{footer}"
         )
 
-    lines = ["Рекомендация на неделю", ""]
+    lines = ["💡 Совет на неделю", ""]
     if advice.has_data:
         lines.append(
             f"Данные: {advice.weeks_with_data} нед., сделано "
