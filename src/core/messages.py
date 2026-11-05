@@ -9,6 +9,7 @@ from datetime import time
 from html import escape
 from zoneinfo import ZoneInfo
 
+from src.core.exercises import DISCLAIMER, ExerciseBlock
 from src.core.help import COMMANDS, FREE_TEXT_EXAMPLES, HELP_TRIGGER_HINT
 from src.core.history import HistoryEntry
 from src.core.plan import (
@@ -520,8 +521,10 @@ def plural_workouts_nominative(count: int) -> str:
     return "тренировок"
 
 
-def format_advice(advice: WeeklyAdvice) -> str:
-    """Рекомендация на неделю: количество и объём (R-49)."""
+def format_advice(
+    advice: WeeklyAdvice, blocks: tuple[ExerciseBlock, ...] = ()
+) -> str:
+    """Рекомендация на неделю: количество, объём и упражнения (R-49, R-50)."""
     footer = "Расписание я не меняю: /edit, /off, /new."
 
     if advice.empty_schedule:
@@ -560,4 +563,19 @@ def format_advice(advice: WeeklyAdvice) -> str:
         f"{_volume_text(advice.recommended_volume)}{reason}"
     )
     lines.append(footer)
+
+    if blocks:
+        lines.extend(["", "Упражнения:"])
+        for block in blocks:
+            if block.restarted:
+                head = (
+                    f"• {block.label}: 8-недельный цикл завершён, начинаем "
+                    f"заново (неделя {block.week} из 8)"
+                )
+            else:
+                head = f"• {block.label}, неделя {block.week} из 8"
+            lines.append(head)
+            for exercise in block.exercises:
+                lines.append(f"   — {exercise}")
+        lines.extend(["", DISCLAIMER])
     return "\n".join(lines)
