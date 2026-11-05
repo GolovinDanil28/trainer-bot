@@ -585,7 +585,8 @@ def to_view(workout: Workout) -> WorkoutView:
         distance_km=workout.distance_km,
         date_once=workout.date_once,
         time_once=time.fromisoformat(workout.time_once) if workout.time_once else None,
-        created_at=workout.created_at,
+        # SQLite отдаёт naive-UTC: без пометки astimezone взял бы зону сервера.
+        created_at=_as_utc(workout.created_at),
     )
 
 
